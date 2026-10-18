@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { View } from 'react-native'
 import StatusBar from '@/components/common/StatusBar'
 import Main from './Main'
@@ -6,6 +7,9 @@ import PlayListPopup from '@/components/player/PlayListPopup'
 import BottomTabBar from './BottomTabBar'
 import { createStyle } from '@/utils/tools'
 import { usePlayerMusicInfo } from '@/store/player/hook'
+import { hidePlayListPopup } from '@/core/playListPopup'
+import { switchHomeTab } from '@/core/common'
+import { type HOME_TAB_ID } from '@/config/homeTabs'
 
 /**
  * 主页外壳：手机 / 平板 / 横屏共用同一套。
@@ -18,6 +22,13 @@ export default () => {
   const musicInfo = usePlayerMusicInfo()
   const miniSpace = useMiniPlayerSpace()
 
+  // 播放列表弹层打开时点底部 Tab：先收起弹层再切页，
+  // 否则页面切了但弹层盖在上面，看起来像「没跳转」
+  const handleSelectTab = useCallback((id: HOME_TAB_ID) => {
+    hidePlayListPopup()
+    switchHomeTab(id)
+  }, [])
+
   return (
     <View style={styles.container}>
       <StatusBar />
@@ -28,7 +39,7 @@ export default () => {
       {/* 弹层在 mini 条之前挂载：弹层从 mini 条上框线后面钻出来，mini 条压在它上面 */}
       <PlayListPopup variant="home" />
       <MiniPlayer />
-      <BottomTabBar />
+      <BottomTabBar onSelect={handleSelectTab} />
     </View>
   )
 }

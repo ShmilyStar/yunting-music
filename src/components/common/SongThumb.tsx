@@ -33,6 +33,9 @@ export const SongThumb = memo(({ size = 42, pic, musicInfo, listId, rounded = 6 
   const url = pic ?? fetched
 
   useEffect(() => {
+    // 换歌时先清掉上一首取回的封面：否则这一帧仍画旧图，
+    // 新请求失败或被取消时会一直停在旧封面上
+    setFetched(null)
     if (pic) return
     if (!musicInfo || musicInfo.source == 'local') return
     let cancelled = false

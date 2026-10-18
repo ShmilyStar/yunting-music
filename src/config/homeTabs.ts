@@ -19,22 +19,11 @@ export const HOME_TABS = [
 
 export type HOME_TAB_ID = typeof HOME_TABS[number]['id']
 
-export const HOME_TAB_IDS: readonly string[] = HOME_TABS.map(t => t.id)
+const HOME_TAB_IDS: readonly string[] = HOME_TABS.map(t => t.id)
 
 export const isHomeTabId = (id: string): id is HOME_TAB_ID => HOME_TAB_IDS.includes(id)
 
 export const HOME_TAB_DEFAULT: HOME_TAB_ID = 'nav_discover'
-
-/** 新增的二级页面 */
-export const EXTRA_PAGES = [
-  'nav_recent',
-  'nav_hot_songs',
-  'nav_singers',
-  'nav_albums',
-  'nav_board_songs',
-] as const
-
-export type EXTRA_PAGE_ID = typeof EXTRA_PAGES[number]
 
 /** 发现页四个快捷入口 */
 export const DISCOVER_QUICK_ENTRIES: ReadonlyArray<{
@@ -81,5 +70,3 @@ export const MINE_SECTIONS: ReadonlyArray<{
 ]
 
 export type MineSectionId = typeof MINE_SECTIONS[number]['id']
-
-export const isMainTabPage = (id: string) => isHomeTabId(id)

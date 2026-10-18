@@ -31,5 +31,3 @@ export const REF_ACCENT = {
 
 export type RefAccentKey = keyof typeof REF_ACCENT
 
-/** 图标蓝（仅启动图标使用） */
-export const REF_ICON_BLUE = ['#54C5F8', '#29B6F6', '#01579B'] as const

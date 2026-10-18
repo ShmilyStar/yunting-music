@@ -194,6 +194,10 @@ export default memo(({ mode }: { mode: CategoryMode }) => {
                   data={aggregates}
                   renderItem={renderAggregate}
                   keyExtractor={item => item.name}
+                  initialNumToRender={12}
+                  maxToRenderPerBatch={6}
+                  windowSize={7}
+                  removeClippedSubviews
                 />
               )
             : (
@@ -202,6 +206,10 @@ export default memo(({ mode }: { mode: CategoryMode }) => {
                   data={songs}
                   renderItem={renderSong}
                   keyExtractor={(item, index) => `${item.id}__${index}`}
+                  initialNumToRender={12}
+                  maxToRenderPerBatch={6}
+                  windowSize={7}
+                  removeClippedSubviews
                 />
               )}
     </View>

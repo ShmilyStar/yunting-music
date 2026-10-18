@@ -30,7 +30,7 @@ export default memo(() => {
         <TouchableOpacity activeOpacity={0.5} onPress={handleShow} style={styles.btn}>
           <Icon
             name="music_time"
-            size={22}
+            size={26}
             color={timeInfo.active ? theme['c-primary-font-active'] : theme['c-primary']}
           />
         </TouchableOpacity>

@@ -43,6 +43,7 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>icomoon.ttf</string>
+		<string>MaterialCommunityIcons.ttf</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>

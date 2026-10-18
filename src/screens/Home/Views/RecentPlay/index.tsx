@@ -105,6 +105,10 @@ export default memo(() => {
               renderItem={renderItem}
               keyExtractor={(item, index) => `${item.id}__${index}`}
               ListEmptyComponent={<Text size={12} color={REF_COLOR.textHint} style={styles.empty}>{t('recent_empty')}</Text>}
+              initialNumToRender={12}
+              maxToRenderPerBatch={6}
+              windowSize={7}
+              removeClippedSubviews
             />
           )}
     </View>

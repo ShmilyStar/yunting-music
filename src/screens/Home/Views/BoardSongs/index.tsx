@@ -140,6 +140,10 @@ export default memo(() => {
         renderItem={renderItem}
         keyExtractor={(item, index) => `${item.id}__${index}`}
         ListEmptyComponent={empty}
+        initialNumToRender={12}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
       />
       <ListMenu
         ref={listMenuRef}

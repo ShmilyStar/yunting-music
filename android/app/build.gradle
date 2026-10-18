@@ -99,8 +99,8 @@ def getNpmPackageJson() {
 }
 def npmPackageJson = getNpmPackageJson()
 // 云听音乐固定版本号：不再跟随根 package.json 的上游版本（1.9.x / versionCode 80）
-def verCode = 1
-def verName = "1.0.0"
+def verCode = 2
+def verName = "1.0.1"
 def applicationName = npmPackageJson["name"]
 
 android {

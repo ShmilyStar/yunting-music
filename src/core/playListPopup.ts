@@ -10,6 +10,8 @@ interface PopupHandle {
   show: () => void
   /** 切换：展开时收起、收起时展开（mini 条上的播放列表键用这个） */
   toggle: () => void
+  /** 收起（已收起时无副作用） */
+  hide: () => void
 }
 
 const listeners: PopupHandle[] = []
@@ -31,4 +33,9 @@ export const showPlayListPopup = () => {
 /** 开/关切换（同样作用于最上层实例） */
 export const togglePlayListPopup = () => {
   listeners[listeners.length - 1]?.toggle()
+}
+
+/** 收起弹出层（切底部 Tab 等场景用；已收起时无副作用） */
+export const hidePlayListPopup = () => {
+  listeners[listeners.length - 1]?.hide()
 }

@@ -266,6 +266,7 @@ export default memo(({ variant = 'page', topInset = 0 }: { variant?: 'page' | 'h
   useEffect(() => registerPlayListPopup({
     show: open,
     toggle: () => { if (rendered) close(); else open() },
+    hide: () => { if (rendered) close() },
   }), [open, close, rendered])
 
   // 弹层打开时，返回键先关弹层（02 §9.2）
@@ -378,18 +379,26 @@ export default memo(({ variant = 'page', topInset = 0 }: { variant?: 'page' | 'h
     inputRange: [0, 1],
     outputRange: [0, panelHeight],
   })
+  /**
+   * 下边界裁切位：面板收起时整块往下平移，若不加裁切，面板下半截会从
+   * mini 条的上下边距缝隙里露出来 —— 看起来像「从底部 Tab 栏上框线冒出来」。
+   * 裁到 mini 条上框线后，面板只会在 mini 条上框线处露头。
+   */
+  const clipBottom = bottomBarHeight + (isHome && miniVisible ? miniSpace : 0)
 
   if (!rendered) return null
 
   return (
-    <Animated.View
-      style={{
-        ...styles.panel,
-        top: panelTop,
-        height: panelHeight,
-        transform: [{ translateY }],
-      }}
-    >
+    // box-none：裁切层本身不吃手势，只有面板自己接收
+    <View style={{ ...styles.clip, top: panelTop, bottom: clipBottom }} pointerEvents="box-none">
+      <Animated.View
+        style={{
+          ...styles.panel,
+          top: 0,
+          height: panelHeight,
+          transform: [{ translateY }],
+        }}
+      >
       {/* 背景画在内容容器上，面板本身透明 */}
       <View style={{ ...styles.content, backgroundColor: theme['c-content-background'] }}>
         {/* 播放列表不再画自己的标题栏：上方的「发现 / 音乐馆 / 我的」标题栏已经说明位置；
@@ -424,6 +433,11 @@ export default memo(({ variant = 'page', topInset = 0 }: { variant?: 'page' | 'h
                 renderItem={renderItem}
                 keyExtractor={(item, index) => `${item.id}__${index}`}
                 extraData={selectedIds}
+                // 播放队列常见几百上千首：给全虚拟化参数，避免首帧一次性挂载
+                initialNumToRender={12}
+                maxToRenderPerBatch={6}
+                windowSize={7}
+                removeClippedSubviews
               />
             )
           : <Text size={12} color={REF_COLOR.textHint} style={styles.empty}>{t('no_item')}</Text>}
@@ -450,11 +464,19 @@ export default memo(({ variant = 'page', topInset = 0 }: { variant?: 'page' | 'h
               </View>
             )}
       </View>
-    </Animated.View>
+      </Animated.View>
+    </View>
   )
 })
 
 const styles = createStyle({
+  /** 裁切层：只负责把面板露出部分限制在 mini 条上框线以上 */
+  clip: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
+  },
   panel: {
     position: 'absolute',
     left: 0,

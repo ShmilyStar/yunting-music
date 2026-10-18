@@ -148,6 +148,10 @@ export default memo(() => {
         renderItem={renderItem}
         keyExtractor={item => item.id}
         ListEmptyComponent={empty}
+        initialNumToRender={12}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews
       />
     </View>
   )

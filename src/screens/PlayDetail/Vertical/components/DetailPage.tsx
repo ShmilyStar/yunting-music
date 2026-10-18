@@ -12,10 +12,10 @@ import { NAV_SHEAR_NATIVE_IDS } from '@/config/constant'
 import { useI18n } from '@/lang'
 import { navigations } from '@/navigation'
 
-/** 大封面最多占可用宽度（02 §6.1） */
-const PIC_WIDTH_RATIO = 0.92
+/** 大封面最多占可用宽度（02 §6.1）——调小以给加大的歌词腾位置 */
+const PIC_WIDTH_RATIO = 0.82
 /** 大封面最多占封面区高度 */
-const PIC_HEIGHT_RATIO = 0.98
+const PIC_HEIGHT_RATIO = 0.92
 
 /**
  * 第 1 屏：大封面 + 歌词预览 + 歌名块。
@@ -65,9 +65,10 @@ export default memo(({ componentId }: { componentId: string }) => {
       </View>
       <View style={styles.lyric}>
         {/* 当前唱到的那句染主题色，随播放进度逐句变化；下一句仍用灰字。
-            字号按用户反馈调大（16/13 → 19/15），只影响歌词预览这两行 */}
-        <Text size={19} numberOfLines={1} color={theme['c-primary']} style={styles.lyricText}>{currentText}</Text>
-        <Text size={15} numberOfLines={1} color={theme['c-font-label']} style={styles.lyricText}>{nextText}</Text>
+            字号按用户反馈再次调大（16/13 → 19/15 → 22/17），
+            腾位置的方式是缩小封面，歌名以下那块（歌名/歌手/操作行/进度/控制行）不动 */}
+        <Text size={22} numberOfLines={1} color={theme['c-primary']} style={styles.lyricText}>{currentText}</Text>
+        <Text size={17} numberOfLines={1} color={theme['c-font-label']} style={styles.lyricText}>{nextText}</Text>
       </View>
       {/* 评论入口：规格 01 §2.5 把评论从独立按钮移进歌曲详情屏，
           这里挂在歌曲信息块上（截图 09 里该处没有额外可见控件） */}

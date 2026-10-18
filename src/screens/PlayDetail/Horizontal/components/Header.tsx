@@ -22,7 +22,7 @@ export default memo(({ onPress }: { onPress: () => void }) => {
       activeOpacity={0.5}
       onPress={onPress}
     >
-      <IconMC name="chevron-down" size={24} color={theme['c-font']} />
+      <IconMC name="chevron-down" size={28} color={theme['c-font']} />
     </TouchableOpacity>
   )
 })

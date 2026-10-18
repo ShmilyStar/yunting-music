@@ -25,9 +25,9 @@ const PageIndicator = ({ pageIndex, pageCount, onSelectPage }: {
     dots.push(
       <TouchableOpacity key={i} style={styles.dotHit} activeOpacity={0.6} onPress={() => { onSelectPage(i) }}>
         <View style={{
-          width: active ? scaleSizeW(9) : scaleSizeW(5),
-          height: scaleSizeH(5),
-          borderRadius: scaleSizeW(2.5),
+          width: active ? scaleSizeW(11) : scaleSizeW(6),
+          height: scaleSizeH(6),
+          borderRadius: scaleSizeW(3),
           backgroundColor: active ? theme['c-primary'] : theme['c-350'],
         }} />
       </TouchableOpacity>,
@@ -63,12 +63,12 @@ export default memo(({ pageIndex, pageCount, onBack, onSelectPage }: HeaderProps
       <StatusBar />
       <View style={styles.row}>
         <TouchableOpacity style={{ ...styles.btn, width: HEADER_HEIGHT }} activeOpacity={0.5} onPress={onBack}>
-          <IconMC name="chevron-down" size={24} color={theme['c-font']} />
+          <IconMC name="chevron-down" size={28} color={theme['c-font']} />
         </TouchableOpacity>
         <TouchableOpacity style={{ ...styles.btn, width: HEADER_HEIGHT }} activeOpacity={0.5} onPress={handleShowTimeout}>
           <Icon
             name="music_time"
-            size={22}
+            size={26}
             color={timeInfo.active ? theme['c-primary-font-active'] : theme['c-primary']}
           />
         </TouchableOpacity>

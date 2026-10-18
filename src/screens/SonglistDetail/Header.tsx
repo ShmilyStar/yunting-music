@@ -1,17 +1,14 @@
 import { forwardRef, memo, useEffect, useImperativeHandle, useState } from 'react'
-import { TouchableOpacity, View } from 'react-native'
+import { View } from 'react-native'
 import ButtonBar from './ActionBar'
-import { useNavigationComponentDidAppear, pop } from '@/navigation'
+import { useNavigationComponentDidAppear } from '@/navigation'
 import { NAV_SHEAR_NATIVE_IDS } from '@/config/constant'
 import Text, { AnimatedText } from '@/components/common/Text'
-import IconMC from '@/components/common/IconMC'
 import { REF_COLOR } from '@/config/uiPalette'
 import { createStyle } from '@/utils/tools'
 import Image from '@/components/common/Image'
 import { useListInfo } from './state'
 import { useAnimateOnecNumber } from '@/utils/hooks/useAnimateNumber'
-import { useStatusbarHeight } from '@/store/common/hook'
-import commonState from '@/store/common/state'
 import songlistState from '@/store/songlist/state'
 import { useI18n } from '@/lang'
 
@@ -76,10 +73,11 @@ export interface DetailInfo {
 
 /**
  * 歌单详情页头部（03 §15）：封面（右下角播放量角标）+ 歌单名（2 行）
- * + 「N 首 · 播放量」+ 两个胶囊按钮；左上角浮着一个返回键。
+ * + 「N 首 · 播放量」+ 两个胶囊按钮。
+ *
+ * 顶部的「‹ 歌单」标题栏由屏幕层用 `SubPageHeader` 渲染，与「歌单」二级页一致。
  */
 export default forwardRef<HeaderType, HeaderProps>(({ componentId }: { componentId: string }, ref) => {
-  const statusBarHeight = useStatusbarHeight()
   const t = useI18n()
   const info = useListInfo()
   const [detailInfo, setDetailInfo] = useState<DetailInfo>({ name: '', desc: '', playCount: '', imgUrl: info.img })
@@ -93,14 +91,9 @@ export default forwardRef<HeaderType, HeaderProps>(({ componentId }: { component
   }), [])
 
   return (
-    <View style={{ ...styles.container, paddingTop: statusBarHeight }}>
-      <TouchableOpacity
-        style={{ ...styles.back, top: statusBarHeight + 2 }}
-        activeOpacity={0.6}
-        onPress={() => { void pop(commonComponentId()) }}
-      >
-        <IconMC name="chevron-left" size={24} color={REF_COLOR.text} />
-      </TouchableOpacity>
+    // 顶部的「‹ 歌单」标题栏由屏幕层渲染（与「歌单」二级页同一条 SubPageHeader），
+    // 这里只负责封面 + 歌单信息 + 按钮
+    <View style={styles.container}>
       <View style={styles.headRow}>
         <Pic componentId={componentId} playCount={detailInfo.playCount} imgUrl={detailInfo.imgUrl} />
         <View style={styles.headInfo} nativeID={NAV_SHEAR_NATIVE_IDS.songlistDetail_title}>
@@ -115,22 +108,10 @@ export default forwardRef<HeaderType, HeaderProps>(({ componentId }: { component
   )
 })
 
-/** 返回键要 pop 的是当前的歌单详情屏 */
-const commonComponentId = () => commonState.componentIds.songlistDetail!
-
 const styles = createStyle({
   container: {
     flexDirection: 'column',
     flexWrap: 'nowrap',
-  },
-  back: {
-    position: 'absolute',
-    left: 2,
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 3,
   },
   headRow: {
     flexDirection: 'row',
@@ -138,7 +119,7 @@ const styles = createStyle({
     flexShrink: 0,
     paddingLeft: 14,
     paddingRight: 14,
-    paddingTop: 34,
+    paddingTop: 14,
     paddingBottom: 14,
   },
   headInfo: {
@@ -156,7 +137,6 @@ const styles = createStyle({
     overflow: 'hidden',
     borderRadius: 6,
     elevation: 2,
-    marginTop: 6,
   },
   playCount: {
     position: 'absolute',

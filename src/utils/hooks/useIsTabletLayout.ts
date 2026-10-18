@@ -19,5 +19,3 @@ export const useIsTabletLayout = () => {
     return min >= 600 && max / min < 1.9
   }, [width, height])
 }
-
-export default useIsTabletLayout

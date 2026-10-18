@@ -4,6 +4,7 @@ import MusicList, { type MusicListType } from './MusicList'
 import PageContent from '@/components/PageContent'
 import StatusBar from '@/components/common/StatusBar'
 import MainTabHeader from '@/screens/Home/Vertical/MainTabHeader'
+import SubPageHeader from '@/screens/Home/Vertical/SubPageHeader'
 import MiniPlayer, { useMiniPlayerSpace } from '@/screens/Home/Vertical/MiniPlayer'
 import PlayListPopup from '@/components/player/PlayListPopup'
 import BottomTabBar from '@/screens/Home/Vertical/BottomTabBar'
@@ -53,10 +54,16 @@ export default ({ componentId, info }: { componentId: string, info: ListInfoItem
     void pop(componentId).then(() => { switchHomeTab(id) })
   }, [componentId])
 
+  // 本屏是推入的独立屏幕，返回键要 pop 自己而不是主界面的导航栈
+  const handleBack = useCallback(() => { void pop(componentId) }, [componentId])
+
   return (
     <PageContent>
       <StatusBar />
       <MainTabHeader title={title} />
+      {/* 与「歌单」二级页同一条标题栏（同样的高度、背景、下框线与返回项），
+          标题也用同一个文案键，两处观感完全一致 */}
+      <SubPageHeader title={t('nav_songlist')} onBack={handleBack} />
       {/* 有歌时给列表留出 mini 条的高度，避免最后一行被压住 */}
       <View style={{ ...styles.content, paddingBottom: musicInfo.id ? miniSpace : 0 }}>
         <ListInfoContext.Provider value={info}>
