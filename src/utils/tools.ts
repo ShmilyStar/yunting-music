@@ -447,10 +447,10 @@ const trasformeProps: Array<keyof Style> = [
   // 'paddingRight',
   // 'paddingTop',
   // 'paddingBottom',
-  'left',
-  'right',
-  'top',
-  'bottom',
+  // 注意：left/right/top/bottom 不在这里 —— 它们是**定位偏移**，必须跟布局走
+  // （scaleSizeW/H），不能按文字缩放，否则用户把「字体大小」调大后，
+  // 绝对定位元素会相对同元素内其它按屏幕缩放的尺寸错位。它们在下面的
+  // switch 里单独处理。
 ]
 export const trasformeStyle = <T extends Style>(styles: T): T => {
   const newStyle: T = { ...styles }
@@ -480,10 +480,22 @@ export const trasformeStyle = <T extends Style>(styles: T): T => {
       case 'padding':
         newStyle.paddingRight = newStyle.paddingLeft = scaleSizeW(v)
         newStyle.paddingBottom = newStyle.paddingTop = scaleSizeH(v)
+        delete (newStyle as Record<string, unknown>).padding
         break
       case 'margin':
         newStyle.marginRight = newStyle.marginLeft = scaleSizeW(v)
         newStyle.marginBottom = newStyle.marginTop = scaleSizeH(v)
+        delete (newStyle as Record<string, unknown>).margin
+        break
+      // 定位偏移按屏幕缩放（不是文字缩放）：同一 style 里通常还混着按 scaleSize
+      // 换算的宽高，混用文字缩放会在「字体大小」调大后整块错位
+      case 'left':
+      case 'right':
+        newStyle[p] = scaleSizeW(v)
+        break
+      case 'top':
+      case 'bottom':
+        newStyle[p] = scaleSizeH(v)
         break
       default:
         // @ts-expect-error

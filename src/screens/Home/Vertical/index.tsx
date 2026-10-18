@@ -11,8 +11,8 @@ import { usePlayerMusicInfo } from '@/store/player/hook'
  * 主页外壳：手机 / 平板 / 横屏共用同一套。
  *
  * 挂载顺序决定同级绘制顺序（`elevation` 不改变兄弟节点顺序）：
- * `Main < MiniPlayer < PlayListPopup < BottomTabBar`
- * —— 效果是弹层从底部 Tab 栏的上框线后面钻出来。
+ * `Main < PlayListPopup < MiniPlayer < BottomTabBar`
+ * —— 弹层从 mini 条上框线后面钻出来，mini 条压在弹层上。
  */
 export default () => {
   const musicInfo = usePlayerMusicInfo()

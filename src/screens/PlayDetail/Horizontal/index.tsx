@@ -81,7 +81,10 @@ export default memo(({ componentId, skipAnimation = false }: HorizontalProps) =>
       easing: Easing.in(Easing.cubic),
       useNativeDriver: true,
     }).start()
-    void pop(componentId).then(() => { after?.() })
+    void pop(componentId).then(() => { after?.() }).catch(() => {
+      // pop 失败要给关闭标志复位，否则返回键会永久失效
+      closingRef.current = false
+    })
   }, [componentId, enterAnim])
 
   const handleSelectTab = useCallback((id: HOME_TAB_ID) => {

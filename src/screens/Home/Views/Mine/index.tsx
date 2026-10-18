@@ -14,7 +14,7 @@ import { useI18n } from '@/lang'
 import { navigateTo } from '@/core/common'
 import { getListMusics, setActiveList } from '@/core/list'
 import { playList } from '@/core/player/player'
-import listState from '@/store/list/state'
+import { useMyList } from '@/store/list/hook'
 
 /** 歌手名的分割符（与参考实现一致） */
 const SINGER_SPLIT_RXP = /[、,;，；&/]/
@@ -49,9 +49,12 @@ export default memo(() => {
     }
   }, [loadMusics])
 
+  // 用 useMyList() 订阅：listState.allList 是可变 store，写死依赖的 useMemo
+  // 会让新建 / 删除 / 重命名歌单后这里永不刷新（Home 页常驻，不会重挂载）
+  const allList = useMyList()
   const userLists = useMemo(
-    () => listState.allList.filter(list => list.id != LIST_IDS.DEFAULT && list.id != LIST_IDS.LOVE),
-    [],
+    () => allList.filter(list => list.id != LIST_IDS.DEFAULT && list.id != LIST_IDS.LOVE),
+    [allList],
   )
 
   const albums = useMemo<AggregateItem[]>(() => {
@@ -165,7 +168,9 @@ export default memo(() => {
                   <TouchableOpacity
                     style={styles.rowMain}
                     activeOpacity={0.7}
-                    onPress={() => { void playList(LIST_IDS.LOVE, index) }}
+                    // 关键词筛选后 filteredMusics 的下标与收藏列表真实下标不一致，
+                    // 直接传 index 会播错歌：按 id 找回真实位置
+                    onPress={() => { void playList(LIST_IDS.LOVE, musics.findIndex(m => m.id == music.id)) }}
                   >
                     <SongThumb size={42} pic={music.meta.picUrl ?? null} musicInfo={music} />
                     <View style={styles.rowInfo}>

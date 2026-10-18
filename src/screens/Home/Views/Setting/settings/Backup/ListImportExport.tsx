@@ -30,7 +30,6 @@ export default forwardRef<ListImportExportType, {}>((props, ref) => {
   const [visible, setVisible] = useState(false)
   const choosePathRef = useRef<ChoosePathType>(null)
   const selectInfoRef = useRef<SelectInfo>((initSelectInfo as SelectInfo))
-  console.log('render import export')
 
   useImperativeHandle(ref, () => ({
     import() {

@@ -90,7 +90,10 @@ export default memo(({ componentId, skipAnimation = false }: VerticalProps) => {
     }).start()
     // pop 与收回动画同时发起：RNN 一 pop 就把下层主界面挂回来，
     // 面板往下收回时露出的是主界面而不是空白
-    void pop(componentId).then(() => { after?.() })
+    void pop(componentId).then(() => { after?.() }).catch(() => {
+      // pop 失败要给关闭标志复位，否则返回键会永久失效
+      closingRef.current = false
+    })
   }, [componentId, enterAnim])
 
   const handleSelectTab = useCallback((id: HOME_TAB_ID) => {

@@ -323,7 +323,9 @@ export default () => {
         onScrollBeginDrag={handleScrollBeginDrag}
         onScrollEndDrag={onScrollEndDrag}
         fadingEdgeLength={100}
-        initialNumToRender={Math.max(line + 10, 10)}
+        // 固定小值：恢复播放时当前行可能有几百，按 line 算会首帧渲染几百行。
+        // 首屏定位交给 scrollToIndex / onScrollToIndexFailed
+        initialNumToRender={16}
         onScrollToIndexFailed={handleScrollToIndexFailed}
         onScroll={handleScroll}
       />

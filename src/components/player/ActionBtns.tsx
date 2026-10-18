@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { TouchableOpacity } from 'react-native'
 import { Icon } from '@/components/common/Icon'
 import IconMC from '@/components/common/IconMC'
@@ -12,6 +12,7 @@ import { updateSetting } from '@/core/common'
 import settingState from '@/store/setting/state'
 import { useSettingValue } from '@/store/setting/hook'
 import playerState from '@/store/player/state'
+import { usePlayMusicInfo } from '@/store/player/hook'
 import { useMusicInLoveList } from '@/store/list/hook'
 import { collectMusic, uncollectMusic } from '@/core/player/player'
 import { showPlayListPopup, togglePlayListPopup } from '@/core/playListPopup'
@@ -74,7 +75,14 @@ export const LoveBtn = memo(({ iconType, size, color, activeColor }: {
   color?: string
   activeColor?: string
 }) => {
-  const musicInfo = getCurrentMusicInfo()
+  // 必须订阅当前播放信息：换歌时父级传给 LoveBtn 的 props 全都没变，
+  // memo 会挡住重渲染，爱心就会停在上一首的收藏状态
+  const playMusicInfo = usePlayMusicInfo()
+  const musicInfo = useMemo(() => {
+    const info = playMusicInfo.musicInfo
+    if (!info) return null
+    return 'progress' in info ? info.metadata.musicInfo : info
+  }, [playMusicInfo])
   const isLoved = useMusicInLoveList(musicInfo)
 
   const handleToggle = useCallback(() => {
@@ -103,6 +111,11 @@ export const DownloadBtn = memo(({ iconType, size, color }: {
   const t = useI18n()
   const [progress, setProgress] = useState<number | null>(null)
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 卸载时清掉延时复位：否则组件已经没了还会 setProgress
+  useEffect(() => () => {
+    if (resetTimer.current) clearTimeout(resetTimer.current)
+  }, [])
 
   const handleDownload = useCallback(() => {
     const musicInfo = getCurrentMusicInfo()

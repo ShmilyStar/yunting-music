@@ -93,6 +93,8 @@ export default memo(({ host, setHost }: {
     switch (syncStatus.message) {
       case SYNC_CODE.authFailed:
         toast(t('setting_sync_code_fail'))
+        // 认证失败只提示，不再往下走「输入授权码」分支
+        break
       case SYNC_CODE.missingAuthCode:
         confirmAlertRef.current?.setVisible(true)
         break

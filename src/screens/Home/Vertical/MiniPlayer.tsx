@@ -140,7 +140,9 @@ const PhoneBar = memo(() => {
 const TabletBar = memo(({ compact }: { compact: boolean }) => {
   const musicInfo = usePlayerMusicInfo()
   const isPlay = useIsPlay()
-  const progress = useProgress(false)
+  // 必须订阅进度：`useProgress(false)` 不订阅 playProgressChanged，
+  // 细进度条与时间会一直停在换歌那一刻的值
+  const progress = useProgress()
 
   const height = compact ? TABLET_COMPACT_HEIGHT : TABLET_HEIGHT
   const thumbSize = compact ? 36 : 50

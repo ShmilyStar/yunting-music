@@ -12,7 +12,7 @@ import {
   MUSIC_TOGGLE_MODE_LIST,
 } from '@/config/constant'
 import { createStyle, toast } from '@/utils/tools'
-import { isTabletLayout, scaleSizeH, scaleSizeW } from '@/utils/pixelRatio'
+import { scaleSizeH, scaleSizeW } from '@/utils/pixelRatio'
 import { useI18n, type Message } from '@/lang'
 import { useTheme } from '@/store/theme/hook'
 import { useStatusbarHeight } from '@/store/common/hook'
@@ -342,7 +342,7 @@ export default memo(({ variant = 'page', topInset = 0 }: { variant?: 'page' | 'h
       <TouchableOpacity
         style={{
           ...styles.row,
-          ...(isTabletLayout ? styles.rowTablet : null),
+          ...(isTablet ? styles.rowTablet : null),
           borderBottomColor: REF_COLOR.divider,
         }}
         activeOpacity={0.7}
@@ -372,7 +372,7 @@ export default memo(({ variant = 'page', topInset = 0 }: { variant?: 'page' | 'h
         </View>
       </TouchableOpacity>
     )
-  }, [currentId, handleRowPress, selectedIds, selectMode, theme])
+  }, [currentId, handleRowPress, isTablet, selectedIds, selectMode, theme])
 
   const translateY = enterAnim.interpolate({
     inputRange: [0, 1],
@@ -414,7 +414,9 @@ export default memo(({ variant = 'page', topInset = 0 }: { variant?: 'page' | 'h
           ? (
               <FlatList
                 // 列数变化必须重建列表，否则 FlatList 会沿用旧的 measure
-                key={isTabletLayout ? 'tablet' : 'phone'}
+                // 必须与 numColumns 用同一个实时判据：启动常量在折叠屏展开 /
+                // 分屏拖拽后不会变，key 不变则 FlatList 会沿用旧的 measure
+                key={isTablet ? 'tablet' : 'phone'}
                 style={styles.list}
                 data={list}
                 numColumns={isTablet ? 2 : 1}
@@ -477,8 +479,8 @@ const styles = createStyle({
     position: 'absolute',
     right: 14,
     bottom: 0,
-    // 与标题同一高度带，保证计数仍是垂直居中的观感
-    height: HEADER_HEIGHT,
+    // 跟着父容器走：多选那一行是 0.7×HEADER_HEIGHT，写死 HEADER_HEIGHT 会高出 14dp
+    height: '100%',
     justifyContent: 'center',
   },
   list: {
