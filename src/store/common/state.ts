@@ -1,0 +1,30 @@
+import { type NAV_ID_Type, type COMPONENT_IDS } from '@/config/constant'
+
+
+export interface InitState {
+  fontSize: number
+  statusbarHeight: number
+  componentIds: Partial<Record<COMPONENT_IDS, string>>
+  navActiveId: NAV_ID_Type
+  lastNavActiveId: NAV_ID_Type
+  /** 导航栈：栈底恒为主 Tab，栈顶为当前页 */
+  navStack: NAV_ID_Type[]
+  sourceNames: Record<LX.OnlineSource | 'all', string>
+  bgPic: string | null
+}
+
+const initData = {}
+
+const state: InitState = {
+  fontSize: global.lx.fontSize,
+  statusbarHeight: 0,
+  componentIds: {},
+  navActiveId: 'nav_discover',
+  lastNavActiveId: 'nav_discover',
+  navStack: ['nav_discover'],
+  sourceNames: initData as InitState['sourceNames'],
+  bgPic: null,
+}
+
+
+export default state

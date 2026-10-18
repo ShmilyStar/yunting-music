@@ -1,0 +1,120 @@
+name: iOS Release
+
+# 只负责 iOS：构建未签名 IPA 并挂到 GitHub Release。
+# Release 同时作为应用内「检查更新」的发布通道（publish/version.json 在 main 上）。
+#
+# Android APK 由 release.yml 负责（需要仓库 Secrets：KEYSTORE_* 四项）。
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    name: 构建未签名 IPA
+    runs-on: macos-15
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 读取 package.json 版本号
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: 安装 JS 依赖
+        run: npm ci
+
+      - name: pod install（关 Flipper）
+        working-directory: ios
+        env:
+          NO_FLIPPER: '1'
+        run: pod install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+
+      - name: 构建 lxcore staticlib（iOS）
+        run: bash rust/build-ios-libs.sh
+
+      - name: unsigned 构建（设备）
+        working-directory: ios
+        run: >
+          xcodebuild
+          -workspace LxMusicMobile.xcworkspace
+          -scheme LxMusicMobile
+          -configuration Release
+          -sdk iphoneos
+          -derivedDataPath build
+          CODE_SIGNING_ALLOWED=NO
+          COMPILER_INDEX_STORE_ENABLE=NO
+          build
+
+      - name: 打包 IPA
+        run: |
+          cd ios/build/Build/Products/Release-iphoneos
+          mkdir Payload
+          cp -r LxMusicMobile.app Payload/
+          zip -qry "yunting-music-v${{ steps.ver.outputs.version }}-unsigned.ipa" Payload
+          ls -l
+
+      - name: 上传 Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: yunting-music-ipa
+          path: ios/build/Build/Products/Release-iphoneos/yunting-music-v${{ steps.ver.outputs.version }}-unsigned.ipa
+          retention-days: 30
+
+  release:
+    name: 发布 Release
+    needs: ipa
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v7
+
+      - name: 下载 IPA
+        uses: actions/download-artifact@v7
+        with:
+          name: yunting-music-ipa
+          path: artifacts
+
+      - name: 计算 tag
+        id: tag
+        run: |
+          V=$(node -p "require('./package.json').version")
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 生成 / 更新 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: 云听音乐 ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          body: |
+            云听音乐 ${{ steps.tag.outputs.tag }}
+
+            - iOS：`yunting-music-*-unsigned.ipa`（未签名，需自行重签安装）
+            - Android APK 见下方附件（arm64-v8a / armeabi-v7a / x86 / x86_64 / universal）
+            - 应用内「检查更新」读取本仓库 `main` 分支的 `publish/version.json`
+          files: |
+            artifacts/*.ipa
+            publish/version.json
+          fail_on_unmatched_files: false
