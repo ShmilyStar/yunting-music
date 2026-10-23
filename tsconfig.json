@@ -1,0 +1,31 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",     /* Recommended React Native TSConfig base */
+  "compilerOptions": {
+    /* Visit https://aka.ms/tsconfig.json to read more about this file */
+
+    "module": "ESNext",
+    "types": ["react-native", "node"],
+    /* Completeness */
+    "skipLibCheck": true,                                 /* Skip type checking all .d.ts files. */
+
+    "rootDir": "./",
+    "paths": {
+      "@/*": ["./src/*"],
+      // "@config": ["src/config"],
+      // "@store": ["src/store"],
+      // "@components": ["src/components"],
+      // "@navigation": ["src/navigation"],
+      // "@screens": ["src/screens"],
+      // "@theme": ["src/theme"],
+      // "@utils": ["src/utils"],
+    }
+  },
+  /**
+   * 只排除测试**用例**（`*.test.ts`），保留 `test/mocks/`：
+   * - 用例里有大量 `vi.fn()` 桩，返回值和真实类型不完全一致（测试代码常规写法），
+   *   混进生产类型检查会淹没 src 的真实错误；
+   * - mocks 需要被 ESLint 的 tsconfig project 覆盖，否则 lint 报
+   *   「TSConfig does not include this file」。
+   */
+  "exclude": ["node_modules", "build", "dist", "test/**/*.test.ts"]
+}
