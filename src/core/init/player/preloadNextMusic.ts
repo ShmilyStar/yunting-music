@@ -87,9 +87,6 @@ export default () => {
   }
 
   const handlePlayProgressChanged: typeof global.state_event.playProgressChanged = (progress) => {
-    // CI 自测下彻底关掉预载：夹具是本地文件，预载没有验证价值，
-    // 但它取的是在线源，会把外网请求灌进自测时间预算
-    if (global.lx.isCiSelfTest) return
     const duration = progress.maxPlayTime
     if (duration > 10 && duration - progress.nowPlayTime < 10 && !preloadMusicInfo.info) {
       void preloadNextMusicUrl(progress.nowPlayTime)

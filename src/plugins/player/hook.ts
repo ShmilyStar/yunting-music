@@ -102,7 +102,12 @@ export function useBufferProgress() {
     let isUnmounted = false
     let preBuffered = 0
     let duration = 0
-    let interval: NodeJS.Timer | null = null
+    /**
+     * 定时器句柄用 `ReturnType<typeof setInterval>` 而不是 `NodeJS.Timer`：
+     * 本项目 `tsconfig` 同时引入了 DOM 类型，`clearInterval` 解析到 DOM 版本
+     * （只接受 number），传 `NodeJS.Timer` 会报 TS2769。
+     */
+    let interval: ReturnType<typeof setInterval> | null = null
 
     const clearItv = () => {
       if (!interval) return

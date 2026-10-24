@@ -47,9 +47,6 @@ global.lx = {
   isEnableSyncLog: false,
   isEnableUserApiLog: false,
 
-  // iOS CI 应用内自测标记（由 ciSelfTestBoot 在检出标记文件后置真，正式包恒为 false）
-  isCiSelfTest: false,
-
   playerTrackId: '',
 
   gettingUrlId: '',

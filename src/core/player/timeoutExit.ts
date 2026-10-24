@@ -8,7 +8,8 @@ type Hook = (time: number, isPlayedStop: boolean) => void
 
 const timeoutTools = {
   bgTimeout: null as number | null,
-  timeout: null as NodeJS.Timer | null,
+  /** 用 `ReturnType` 而非 `NodeJS.Timer`：`tsconfig` 引入了 DOM 类型，`clearInterval` 只接受 number */
+  timeout: null as ReturnType<typeof setInterval> | null,
   startTime: 0,
   time: -1,
   timeHooks: [] as Hook[],

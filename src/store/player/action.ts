@@ -89,8 +89,26 @@ export default {
       }
       return true
     })
-    if (topList.length) arrUnshift(state.tempPlayList, topList.map(({ musicInfo, listId }) => ({ musicInfo, listId, isTempPlay: true })))
-    if (bottomList.length) arrPush(state.tempPlayList, bottomList.map(({ musicInfo, listId }) => ({ musicInfo, listId, isTempPlay: true })))
+    /**
+     * 临时列表项的 `listId` 允许为 null（歌曲可能不属于任何列表），
+     * 而 `state.tempPlayList` 的元素类型是 `PlayMusicInfo`（`listId: string`）。
+     * 这里在写入点收敛成 `''`（表示「无归属列表」），避免整体放宽类型 ——
+     * 放宽会让所有读取方都要处理 null，收益远小于这一处转换。
+     */
+    if (topList.length) {
+      arrUnshift(state.tempPlayList, topList.map(({ musicInfo, listId }) => ({
+        musicInfo,
+        listId: listId ?? '',
+        isTempPlay: true,
+      })))
+    }
+    if (bottomList.length) {
+      arrPush(state.tempPlayList, bottomList.map(({ musicInfo, listId }) => ({
+        musicInfo,
+        listId: listId ?? '',
+        isTempPlay: true,
+      })))
+    }
 
     global.state_event.playTempPlayListChanged({ ...state.tempPlayList })
   },
