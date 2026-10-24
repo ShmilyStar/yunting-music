@@ -53,9 +53,9 @@
 ### 文件 MD5
 
 ```
-5f56d5b6cd486f9ee9dfcf0b4e603b81  yunting-music-v1.0.2-arm64-v8a.apk
-45dd504b9056c9fc64ce70acd954f371  yunting-music-v1.0.2-armeabi-v7a.apk
-f6f66396aa044d83e38366212c16f936  yunting-music-v1.0.2-x86.apk
-084711ddac981514ea4e70ff6a24650e  yunting-music-v1.0.2-x86_64.apk
-0e0f304230cbc2d4047b090c2e471c4e  yunting-music-v1.0.2-universal.apk
+fec2177d54144227f784cda59e570a24  yunting-music-v1.0.2-arm64-v8a.apk
+3d8d39f1a362e7c929779131a5646bfe  yunting-music-v1.0.2-armeabi-v7a.apk
+140e92b6bf247617d32f7753299df2ef  yunting-music-v1.0.2-x86.apk
+01e3bd4e60e459ef0152231d1b66ad1b  yunting-music-v1.0.2-x86_64.apk
+54c6c6539a9379c2187fdcb38efee628  yunting-music-v1.0.2-universal.apk
 ```
