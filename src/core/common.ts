@@ -1,0 +1,150 @@
+import { hideDesktopLyric } from './desktopLyric'
+import { exitApp as utilExitApp } from '@/utils/nativeModules/utils'
+import { destroy as destroyPlayer } from '@/plugins/player/utils'
+import { initSetting as initAppSetting } from '@/config/setting'
+import { setLanguage as applyLanguage } from '@/lang/i18n'
+import { Platform } from 'react-native'
+
+import settingActions from '@/store/setting/action'
+import settingState from '@/store/setting/state'
+import commonActions from '@/store/common/action'
+import commonState, { type InitState as CommonStateType } from '@/store/common/state'
+
+import { storageDataPrefix } from '@/config/constant'
+import { saveData } from '@/plugins/storage'
+import { throttle } from '@/utils/common'
+import { getSelectedManagedFolder, saveFontSize, saveViewPrevState, setSelectedManagedFolder } from '@/utils/data'
+import { showPactModal as handleShowPactModal } from '@/navigation'
+import { getPersistedUriList, selectManagedFolder } from '@/utils/fs'
+
+
+const throttleSaveSetting = throttle(() => {
+  void saveData(storageDataPrefix.setting, settingState.setting)
+})
+
+/**
+ * 初始化设置
+ */
+export const initSetting = async() => {
+  const setting = (await initAppSetting()).setting
+  settingActions.updateSetting(setting)
+  return setting
+}
+
+/**
+ * 更新设置
+ * @param setting 新设置
+ */
+export const updateSetting = (setting: Partial<LX.AppSetting>) => {
+  settingActions.updateSetting(setting)
+  throttleSaveSetting()
+}
+
+export const setLanguage = (locale: Parameters<typeof applyLanguage>[0]) => {
+  updateSetting({ 'common.langId': locale })
+  global.state_event.languageChanged(locale)
+  requestAnimationFrame(() => {
+    applyLanguage(locale)
+  })
+}
+
+
+let isDestroying = false
+export const exitApp = (reason: string) => {
+  console.log('Handle Exit App, Reason: ' + reason)
+  if (isDestroying) return
+  isDestroying = true
+  void Promise.all([
+    hideDesktopLyric(),
+    destroyPlayer(),
+  ]).finally(() => {
+    isDestroying = false
+    utilExitApp()
+  })
+}
+
+/**
+ * 保存「字体大小」设置（重启后生效）。
+ *
+ * 与本次运行的倍率 `global.lx.fontSize` 刻意分开：
+ * - store 里的 `fontSize` = **已保存的倍率**，设置页勾选状态读它；
+ * - `global.lx.fontSize` = **本次运行实际使用的倍率**，只由 `app.ts` 启动时赋值。
+ *
+ * 两者不一致时，说明「已保存，重启后生效」。
+ * 不在这里改 `global.lx.fontSize`：字号贯穿几十处模块级样式表与 `scaleSizeW`
+ * 调用，运行中途改会让已挂载页面的尺寸错乱（同屏出现新旧两种比例）。
+ */
+export const setFontSize = (size: number) => {
+  commonActions.setFontSize(size)
+  void saveFontSize(size)
+}
+
+/** 本次运行实际生效的字号倍率（启动时从持久值读取） */
+export const getAppliedFontSize = () => global.lx.fontSize || 1
+
+export const setStatusbarHeight = (size: number) => {
+  commonActions.setStatusbarHeight(size)
+}
+
+export const setComponentId = (name: keyof CommonStateType['componentIds'], id: string) => {
+  commonActions.setComponentId(name, id)
+}
+export const removeComponentId = (name: string) => {
+  commonActions.removeComponentId(name)
+}
+
+export const setNavActiveId = (id: Parameters<typeof commonActions.setNavActiveId>['0']) => {
+  if (id == commonState.navActiveId) return
+  commonActions.setNavActiveId(id)
+  if (id != 'nav_setting') {
+    commonActions.setLastNavActiveId(id)
+    saveViewPrevState({ id })
+  }
+}
+
+/** 切主 Tab（只允许三个主 Tab），会重置导航栈 */
+export const switchHomeTab = (id: Parameters<typeof commonActions.switchHomeTab>['0']) => {
+  if (commonState.navActiveId == id && commonState.navStack.length == 1) return
+  commonActions.switchHomeTab(id)
+  commonActions.setLastNavActiveId(id)
+  saveViewPrevState({ id })
+}
+
+/** 进入二级页：压栈 + 切页 */
+export const navigateTo = (id: Parameters<typeof commonActions.navigateTo>['0']) => {
+  commonActions.navigateTo(id)
+  if (id != 'nav_setting') {
+    commonActions.setLastNavActiveId(id)
+    saveViewPrevState({ id })
+  }
+}
+
+/** 返回上一页；已在栈底返回 false（由调用方决定是否退出应用） */
+export const goBackNav = () => commonActions.goBackNav()
+
+export const showPactModal = () => {
+  handleShowPactModal()
+}
+
+export const checkStoragePermissions = async() => {
+  // iOS 沙箱内无需存储权限（plan §6.2：checkManagedFolderPermission 恒返回 true）
+  if (Platform.OS !== 'android') return true
+  const selectedManagedFolder = await getSelectedManagedFolder()
+  if (selectedManagedFolder) return (await getPersistedUriList()).some(uri => selectedManagedFolder.startsWith(uri))
+  return false
+}
+
+export const requestStoragePermission = async() => {
+  if (Platform.OS !== 'android') return true
+  const isGranted = await checkStoragePermissions()
+  if (isGranted) return isGranted
+
+  const uri = await selectManagedFolder()
+  if (!uri.isDirectory) return false
+  await setSelectedManagedFolder(uri.path)
+  return true
+}
+
+export const setBgPic = (pic: string | null) => {
+  commonActions.setBgPic(pic)
+}

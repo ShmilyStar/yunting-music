@@ -1,0 +1,91 @@
+import { memo, useRef, useState, useEffect } from 'react'
+import { View } from 'react-native'
+
+// import { gzip, ungzip } from 'pako'
+
+import SubTitle from '../../components/SubTitle'
+import Button from '../../components/Button'
+import { toast, createStyle } from '@/utils/tools'
+import { useI18n } from '@/lang'
+import Text from '@/components/common/Text'
+import { clearLyric, clearOtherSource, getMetaCache } from '@/utils/data'
+
+export default memo(() => {
+  const t = useI18n()
+  const isUnmountedRef = useRef(false)
+  const [otherSourceCleaning, setOtherSourceCleaning] = useState(false)
+  const [lyricCleaning, setLyricCleaning] = useState(false)
+  const [cacheInfo, setCacheInfo] = useState<{
+    otherSourceKeys: null | string[]
+    // musicUrlKeys: null | string[]
+    lyricKeys: null | string[]
+  }>({ otherSourceKeys: null, lyricKeys: null })
+
+  const handleGetMetaCache = () => {
+    void getMetaCache().then((info) => {
+      if (isUnmountedRef.current) return
+      setCacheInfo(info)
+    })
+  }
+
+  const handleCleanOtherSourceCache = () => {
+    if (!cacheInfo.otherSourceKeys?.length) return
+    setOtherSourceCleaning(true)
+    void clearOtherSource(cacheInfo.otherSourceKeys).then(() => {
+      if (isUnmountedRef.current) return
+      toast(t('setting_other_cache_clear_success_tip'))
+    }).finally(() => {
+      if (isUnmountedRef.current) return
+      handleGetMetaCache()
+      setOtherSourceCleaning(false)
+    })
+  }
+
+  const handleCleanLyricKeysCache = () => {
+    if (!cacheInfo.lyricKeys?.length) return
+    setLyricCleaning(true)
+    void clearLyric(cacheInfo.lyricKeys).then(() => {
+      if (isUnmountedRef.current) return
+      toast(t('setting_other_cache_clear_success_tip'))
+    }).finally(() => {
+      if (isUnmountedRef.current) return
+      handleGetMetaCache()
+      setLyricCleaning(false)
+    })
+  }
+
+
+  useEffect(() => {
+    isUnmountedRef.current = false
+    handleGetMetaCache()
+    return () => { isUnmountedRef.current = true }
+  }, [])
+
+  return (
+    <>
+      <SubTitle title={t('setting__other_meta_cache')}>
+        <View style={styles.cacheSize}>
+          <Text>{cacheInfo.otherSourceKeys == null ? t('setting_other_cache_getting') : `${t('setting__other_other_source_label')}${cacheInfo.otherSourceKeys.length}`}</Text>
+          {/* <Text>{cacheInfo.musicUrlKeys == null ? t('setting_other_cache_getting') : `${t('setting__other_music_url_label')}${cacheInfo.musicUrlKeys.length}`}</Text> */}
+          <Text>{cacheInfo.lyricKeys == null ? t('setting_other_cache_getting') : `${t('setting__other_lyric_raw_label')}${cacheInfo.lyricKeys.length}`}</Text>
+        </View>
+        <View style={styles.clearBtn}>
+          <Button disabled={otherSourceCleaning} onPress={handleCleanOtherSourceCache}>{t('setting__other_other_source_clear_btn')}</Button>
+          {/* <Button disabled={cleaning} onPress={handleCleanMusicUrlCache}>{t('setting__other_music_url_clear_btn')}</Button> */}
+          <Button disabled={lyricCleaning} onPress={handleCleanLyricKeysCache}>{t('setting__other_lyric_raw_clear_btn')}</Button>
+        </View>
+      </SubTitle>
+    </>
+  )
+})
+
+const styles = createStyle({
+  cacheSize: {
+    marginBottom: 5,
+  },
+  clearBtn: {
+    gap: 5,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+})

@@ -1,0 +1,100 @@
+name: iOS Unsigned IPA
+
+# 只负责「构建未签名 IPA 并上传为 Artifact」，**不创建任何 Release**。
+#
+# 与 `ios-release.yml` 的区别：那个会在 tag/push 后自动建 Release 并挂载产物，
+# 这里刻意去掉 release 环节，仅供内部验证与手动取包。
+#
+# 触发方式：
+#   - 手动（Actions 页面 Run workflow）
+#   - push 到 main 且改动涉及 iOS 相关路径
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'ios/**'
+      - 'rust/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.nvmrc'
+      - '.github/workflows/ios-unsigned-ipa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    name: 构建未签名 IPA
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 读取版本号
+        id: ver
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: 安装 JS 依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: pod install（关闭 Flipper）
+        working-directory: ios
+        env:
+          NO_FLIPPER: '1'
+        run: pod install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: 构建 lxcore staticlib（iOS）
+        run: bash rust/build-ios-libs.sh
+
+      - name: unsigned 构建（真机 slice）
+        working-directory: ios
+        run: >
+          xcodebuild
+          -workspace LxMusicMobile.xcworkspace
+          -scheme LxMusicMobile
+          -configuration Release
+          -sdk iphoneos
+          -derivedDataPath build
+          CODE_SIGNING_ALLOWED=NO
+          COMPILER_INDEX_STORE_ENABLE=NO
+          build
+
+      - name: 打包 IPA
+        run: |
+          set -euo pipefail
+          cd ios/build/Build/Products/Release-iphoneos
+          rm -rf Payload
+          mkdir -p Payload
+          # 用 ditto 而不是 cp -r：ditto 会完整保留符号链接、扩展属性与资源分叉，
+          # 与 macOS 系统打包行为一致。第三方签名工具（全能签 / 轻松签）
+          # 对 zip 用 cp -r 打出来的 symlink 支持不好，容易报「解压失败」。
+          ditto LxMusicMobile.app Payload/LxMusicMobile.app
+          NAME="yunting-music-v${{ steps.ver.outputs.version }}-unsigned.ipa"
+          # -y 保留符号链接为链接（不跟随展开），这是 .app 里 framework 所必需的
+          zip -qry "$NAME" Payload
+          ls -lh "$NAME"
+          # 校验包内 Payload 结构完整
+          unzip -l "$NAME" | head -20
+
+      - name: 上传 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: yunting-music-ios-unsigned-ipa
+          path: ios/build/Build/Products/Release-iphoneos/*.ipa
+          if-no-files-found: error
+          retention-days: 30

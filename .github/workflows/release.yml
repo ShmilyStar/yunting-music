@@ -1,0 +1,283 @@
+name: Build
+
+# Android + iOS 全量发布（iOS 那份也可由 ios-release.yml 单独跑）。
+# 仅在手动触发：Android 作业需要仓库 Secrets（KEYSTORE_STORE_FILE / KEYSTORE_KEY_ALIAS /
+# KEYSTORE_PASSWORD / KEYSTORE_KEY_PASSWORD），没配之前 push 触发会直接失败。
+on:
+  workflow_dispatch:
+
+jobs:
+  CheckVersion:
+    name: CheckVersion
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check whether version tag exists
+        id: check
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if git tag -l "v${PACKAGE_VERSION}" | grep -q .; then
+            echo "Tag v${PACKAGE_VERSION} already exists, skip release"
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+
+  Android:
+    name: Android
+    runs-on: ubuntu-latest
+    needs: [CheckVersion]
+    if: needs.CheckVersion.outputs.should_run == 'true'
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v7
+
+      - name: Setup Env
+        uses: ./.github/actions/setup
+
+      - name: Build Packages
+        env:
+          DISABLE_SVG: 1
+        shell: bash
+        run: |
+          cd android
+          echo ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }} | base64 --decode > app/${{ secrets.KEYSTORE_STORE_FILE }}
+          ./gradlew assembleRelease -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
+          rm -f app/${{ secrets.KEYSTORE_STORE_FILE }}
+
+      # Push tag to GitHub if package.json version's tag is not tagged
+      - name: Get package version
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+
+      - name: Create git tag
+        uses: pkgdeps/git-tag-action@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          github_repo: ${{ github.repository }}
+          version: ${{ env.PACKAGE_VERSION }}
+          git_commit_sha: ${{ github.sha }}
+          git_tag_prefix: "v"
+
+      - name: Generate file MD5
+        run: |
+          cd android/app/build/outputs/apk/release
+          md5sum *.apk
+
+      - name: Upload Artifact
+        uses: ./.github/actions/upload-artifact
+        env:
+          PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
+
+  iOS:
+    name: iOS
+    runs-on: macos-15
+    needs: [CheckVersion]
+    if: needs.CheckVersion.outputs.should_run == 'true'
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 安装 JS 依赖
+        run: npm ci
+
+      - name: pod install（关 Flipper）
+        working-directory: ios
+        env:
+          NO_FLIPPER: '1'
+        run: pod install
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, x86_64-apple-ios
+
+      - name: 构建 lxcore staticlib（iOS）
+        run: bash rust/build-ios-libs.sh
+
+      - name: unsigned 构建（设备）
+        working-directory: ios
+        run: >
+          xcodebuild
+          -workspace LxMusicMobile.xcworkspace
+          -scheme LxMusicMobile
+          -configuration Release
+          -sdk iphoneos
+          -derivedDataPath build
+          CODE_SIGNING_ALLOWED=NO
+          COMPILER_INDEX_STORE_ENABLE=NO
+          build
+
+      - name: Get package version
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+
+      - name: 打包 IPA
+        working-directory: ios/build/Build/Products/Release-iphoneos
+        run: |
+          mkdir Payload
+          cp -r LxMusicMobile.app Payload/
+          zip -qry yunting-music-v${{ env.PACKAGE_VERSION }}-unsigned.ipa Payload
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: app-v${{ env.PACKAGE_VERSION }}-unsigned-ipa
+          path: ios/build/Build/Products/Release-iphoneos/yunting-music-v${{ env.PACKAGE_VERSION }}-unsigned.ipa
+
+  # Android_SL:
+  #   name: Android_SL
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Check out git repository
+  #       uses: actions/checkout@v7
+  #       with:
+  #         ref: statusbar_lyric
+
+  #     - name: Setup Env
+  #       uses: ./.github/actions/setup
+
+  #     - name: Build Packages
+  #       shell: bash
+  #       run: |
+  #         cd android
+  #         echo ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }} | base64 --decode > app/${{ secrets.KEYSTORE_STORE_FILE }}
+  #         ./gradlew assembleRelease -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
+  #         rm -f app/${{ secrets.KEYSTORE_STORE_FILE }}
+
+  #     # Push tag to GitHub if package.json version's tag is not tagged
+  #     - name: Get package version
+  #       run: |
+  #         node -p -e '`PACKAGE_VERSION=${require("./package.json").version}`' >> $GITHUB_ENV
+  #         echo "COMMIT_SHA=$(git show -s --format=%H)" >> $GITHUB_ENV
+
+  #     - name: Create git tag
+  #       uses: pkgdeps/git-tag-action@v3
+  #       with:
+  #         github_token: ${{ secrets.GITHUB_TOKEN }}
+  #         github_repo: ${{ github.repository }}
+  #         version: ${{ env.PACKAGE_VERSION }}
+  #         git_commit_sha: ${{ env.COMMIT_SHA }}
+  #         git_tag_prefix: "v"
+
+  #     - name: Generate file MD5
+  #       run: |
+  #         echo "current commit sha: ${{ env.COMMIT_SHA }}"
+  #         cd android/app/build/outputs/apk/release
+  #         md5sum *.apk
+
+  #     - name: Upload Artifact
+  #       uses: ./.github/actions/upload-artifact
+  #       env:
+  #         PACKAGE_TYPE: 'Android_SL'
+  #         PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
+
+  # Android_5:
+  #   name: Android_5
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Check out git repository
+  #       uses: actions/checkout@v7
+  #       with:
+  #         ref: android_5
+
+  #     - name: Setup Env
+  #       uses: ./.github/actions/setup
+
+  #     - name: Build Packages
+  #       shell: bash
+  #       run: |
+  #         cd android
+  #         echo ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }} | base64 --decode > app/${{ secrets.KEYSTORE_STORE_FILE }}
+  #         ./gradlew assembleRelease -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
+  #         rm -f app/${{ secrets.KEYSTORE_STORE_FILE }}
+
+  #     # Push tag to GitHub if package.json version's tag is not tagged
+  #     - name: Get package version
+  #       run: |
+  #         node -p -e '`PACKAGE_VERSION=${require("./package.json").version}`' >> $GITHUB_ENV
+  #         echo "COMMIT_SHA=$(git show -s --format=%H)" >> $GITHUB_ENV
+
+  #     - name: Create git tag
+  #       uses: pkgdeps/git-tag-action@v3
+  #       with:
+  #         github_token: ${{ secrets.GITHUB_TOKEN }}
+  #         github_repo: ${{ github.repository }}
+  #         version: ${{ env.PACKAGE_VERSION }}
+  #         git_commit_sha: ${{ env.COMMIT_SHA }}
+  #         git_tag_prefix: "v"
+
+  #     - name: Generate file MD5
+  #       run: |
+  #         echo "current commit sha: ${{ env.COMMIT_SHA }}"
+  #         cd android/app/build/outputs/apk/release
+  #         md5sum *.apk
+
+  #     - name: Upload Artifact
+  #       uses: ./.github/actions/upload-artifact
+  #       env:
+  #         PACKAGE_TYPE: 'Android_5'
+  #         PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
+
+  Release:
+    name: Release
+    runs-on: ubuntu-latest
+    # needs: [Android, Android_SL]
+    needs: [CheckVersion, Android, iOS]
+    if: needs.CheckVersion.outputs.should_run == 'true'
+    steps:
+      - name: Check out git repository
+        uses: actions/checkout@v7
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: ./artifacts
+          merge-multiple: true
+
+      - name: Generate file MD5
+        run: |
+          echo -e '\n### File MD5\n```' >> ./publish/changeLog.md
+          cd artifacts
+          md5sum *.apk *.ipa >> ../publish/changeLog.md
+          echo -e '```\n' >> ../publish/changeLog.md
+          echo -e '\n本仓库签名与上游不同，从上游版本覆盖安装需先卸载。\n\n[软件安装包说明](https://lyswhut.github.io/lx-music-doc/download#%E8%BD%AF%E4%BB%B6%E5%AE%89%E8%A3%85%E5%8C%85%E8%AF%B4%E6%98%8E)\n' >> ../publish/changeLog.md
+
+      - name: Get package version
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: ./publish/changeLog.md
+          prerelease: false
+          draft: false
+          tag_name: v${{ env.PACKAGE_VERSION }}
+          files: |
+            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-arm64-v8a.apk
+            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-armeabi-v7a.apk
+            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-x86_64.apk
+            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-x86.apk
+            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-universal.apk
+            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-unsigned.ipa
+
+          # artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-sl-arm64-v8a.apk
+          # artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-android_5-universal.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

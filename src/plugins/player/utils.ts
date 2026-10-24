@@ -1,0 +1,236 @@
+import TrackPlayer, { Capability, Event, RepeatMode, State } from 'react-native-track-player'
+import BackgroundTimer from 'react-native-background-timer'
+import { playMusic as handlePlayMusic, updateNowPlayingMetadataIOS, takeQueueSwitchGuard, resetQueueMirror } from './playList'
+import { existsFile, moveFile, privateStorageDirectoryPath, temporaryDirectoryPath } from '@/utils/fs'
+import { isAndroid, toast } from '@/utils/tools'
+// import { PlayerMusicInfo } from '@/store/modules/player/playInfo'
+
+
+export { useBufferProgress } from './hook'
+
+const emptyIdRxp = /\/\/default$/
+const tempIdRxp = /\/\/default$|\/\/default\/\/restorePlay$/
+export const isEmpty = (trackId = global.lx.playerTrackId) => {
+  return !trackId || emptyIdRxp.test(trackId)
+}
+export const isTempId = (trackId = global.lx.playerTrackId) => !trackId || tempIdRxp.test(trackId)
+
+// export const replacePlayTrack = async(newTrack, oldTrack) => {
+const playMusic = ((fn: (musicInfo: LX.Player.PlayMusic, url: string, time: number) => void, delay = 800) => {
+  let delayTimer: number | null = null
+  let isDelayRun = false
+  let timer: number | null = null
+  let _musicInfo: LX.Player.PlayMusic | null = null
+  let _url = ''
+  let _time = 0
+  return (musicInfo: LX.Player.PlayMusic, url: string, time: number) => {
+    _musicInfo = musicInfo
+    _url = url
+    _time = time
+    if (timer) {
+      BackgroundTimer.clearTimeout(timer)
+      timer = null
+    }
+    if (isDelayRun) {
+      if (delayTimer) {
+        BackgroundTimer.clearTimeout(delayTimer)
+        delayTimer = null
+      }
+      timer = BackgroundTimer.setTimeout(() => {
+        timer = null
+        let musicInfo = _musicInfo
+        let url = _url
+        let time = _time
+        _musicInfo = null
+        _url = ''
+        _time = 0
+        isDelayRun = false
+        fn(musicInfo!, url, time)
+      }, delay)
+    } else {
+      isDelayRun = true
+      fn(musicInfo, url, time)
+      delayTimer = BackgroundTimer.setTimeout(() => {
+        delayTimer = null
+        isDelayRun = false
+      }, 500)
+    }
+  }
+})((musicInfo, url, time) => {
+  handlePlayMusic(musicInfo, url, time)
+})
+
+export const setResource = (musicInfo: LX.Player.PlayMusic, url: string, duration?: number) => {
+  playMusic(musicInfo, url, duration ?? 0)
+}
+
+export const setPlay = async() => TrackPlayer.play()
+export const getPosition = async() => TrackPlayer.getPosition()
+export const getDuration = async() => TrackPlayer.getDuration()
+export const setStop = async() => {
+  // 守卫窗口覆盖到下一次队列手术（见 playList.ts takeQueueSwitchGuard 注释）：
+  // stop 的空队列事件与后续重建之间可能隔着取链耗时，不得在本地释放
+  takeQueueSwitchGuard()
+  await TrackPlayer.stop()
+  // fork 的 iOS stop() 已清空原生队列（见 resetQueueMirror 注释），
+  // 同步清空 JS 镜像，否则下次 add 后索引错位
+  resetQueueMirror()
+  // fork 的 iOS stop() 已清空队列（QueuedAudioPlayer.reset → clearQueue），
+  // 空队列上 skipToNext 命中原生 noNextItem 守卫 reject，打断
+  // handlePlay 的 await，后续歌曲永远拿不到 URL；Android 的 stop
+  // 保留队列，需跳到 default 轨标记「空」，保持原行为
+  if (isAndroid && !isEmpty()) await TrackPlayer.skipToNext()
+}
+export const setLoop = async(loop: boolean) => TrackPlayer.setRepeatMode(loop ? RepeatMode.Off : RepeatMode.Track)
+
+export const setPause = async() => TrackPlayer.pause()
+// export const skipToNext = () => TrackPlayer.skipToNext()
+export const setCurrentTime = async(time: number) => TrackPlayer.seekTo(time)
+export const setVolume = async(num: number) => TrackPlayer.setVolume(num)
+export const setPlaybackRate = async(num: number) => TrackPlayer.setRate(num)
+export interface NowPlayingTitles {
+  title?: string
+  artist?: string
+  album?: string
+  lyric?: string
+}
+export const updateNowPlayingTitles = async(titles: NowPlayingTitles) => {
+  if (isAndroid) return TrackPlayer.updateNowPlayingTitles(titles)
+  updateNowPlayingMetadataIOS({
+    title: titles.title,
+    artist: titles.artist,
+    album: titles.album,
+  })
+}
+
+export const resetPlay = async() => Promise.all([setPause(), setCurrentTime(0)])
+
+// 任务 5.5：fork 的缓存三方法仅 Android 侧实现，iOS 降级为安全值
+export const isCached = async(url: string) => isAndroid ? TrackPlayer.isCached(url) : false
+export const getCacheSize = async() => isAndroid ? TrackPlayer.getCacheSize() : 0
+export const clearCache = async() => {
+  if (!isAndroid) return
+  return TrackPlayer.clearCache()
+}
+export const migratePlayerCache = async() => {
+  const newCachePath = privateStorageDirectoryPath + '/TrackPlayer'
+  if (await existsFile(newCachePath)) return
+  const oldCachePath = temporaryDirectoryPath + '/TrackPlayer'
+  if (!await existsFile(oldCachePath)) return
+  let timeout: number | null = BackgroundTimer.setTimeout(() => {
+    timeout = null
+    toast(global.i18n.t('player_cache_migrating'), 'long')
+  }, 2_000)
+  await moveFile(oldCachePath, newCachePath).finally(() => {
+    if (timeout) BackgroundTimer.clearTimeout(timeout)
+  })
+}
+
+export const destroy = async() => {
+  if (global.lx.playerStatus.isIniting || !global.lx.playerStatus.isInitialized) return
+  // 任务 9.18：destroy 内部经 player.stop() 清队列，逐件发射的
+  // PlaybackTrackChanged 事件形状与自然播完一致，不加守卫会被 service.ts
+  // 判为播完 → playerEnded → playNext → 重新 setup 并起播——真机「退出
+  // 应用后后台切歌播放」的直接根因。守卫语义与 setStop 同款：本地不释放，
+  // 由下一次队列手术的令牌释放兜住——destroy 的 stop() 事件经桥异步投递，
+  // 可能晚于 destroy() resolve 才到，立即释放会漏接；仅 iOS 生效
+  takeQueueSwitchGuard()
+  await TrackPlayer.destroy()
+  // fork 的 iOS destroy 已清空原生队列，同步清 JS 镜像（同 setStop 口径），
+  // 否则播放器再次初始化后 add 会撞上残留镜像导致索引错位
+  resetQueueMirror()
+  global.lx.playerStatus.isInitialized = false
+}
+
+type PlayStatus = 'None' | 'Ready' | 'Playing' | 'Paused' | 'Stopped' | 'Buffering' | 'Connecting'
+
+export const onStateChange = async(listener: (state: PlayStatus) => void) => {
+  const sub = TrackPlayer.addEventListener(Event.PlaybackState, state => {
+    let _state: PlayStatus
+    switch (state) {
+      case State.Ready:
+        _state = 'Ready'
+        break
+      case State.Playing:
+        _state = 'Playing'
+        break
+      case State.Paused:
+        _state = 'Paused'
+        break
+      case State.Stopped:
+        _state = 'Stopped'
+        break
+      case State.Buffering:
+        _state = 'Buffering'
+        break
+      case State.Connecting:
+        _state = 'Connecting'
+        break
+      case State.None:
+      default:
+        _state = 'None'
+        break
+    }
+    listener(_state)
+  })
+
+  return () => {
+    sub.remove()
+  }
+}
+
+/**
+ * Subscription player state chuange event
+ * @param options state change event
+ * @returns remove event function
+ */
+// export const playState = callback => TrackPlayer.addEventListener('playback-state', callback)
+
+export const updateOptions = async(options = {
+  // Whether the player should stop running when the app is closed on Android
+  // stopWithApp: true,
+
+  // An array of media controls capabilities
+  // Can contain CAPABILITY_PLAY, CAPABILITY_PAUSE, CAPABILITY_STOP, CAPABILITY_SEEK_TO,
+  // CAPABILITY_SKIP_TO_NEXT, CAPABILITY_SKIP_TO_PREVIOUS, CAPABILITY_SET_RATING
+  capabilities: [
+    Capability.Play,
+    Capability.Pause,
+    Capability.Stop,
+    Capability.SeekTo,
+    Capability.SkipToNext,
+    Capability.SkipToPrevious,
+  ],
+
+  notificationCapabilities: [
+    Capability.Play,
+    Capability.Pause,
+    Capability.Stop,
+    Capability.SkipToNext,
+    Capability.SkipToPrevious,
+  ],
+
+  // // An array of capabilities that will show up when the notification is in the compact form on Android
+  compactCapabilities: [
+    Capability.Play,
+    Capability.Pause,
+    Capability.Stop,
+    Capability.SkipToNext,
+  ],
+
+  // Icons for the notification on Android (if you don't like the default ones)
+  // playIcon: require('./play-icon.png'),
+  // pauseIcon: require('./pause-icon.png'),
+  // stopIcon: require('./stop-icon.png'),
+  // previousIcon: require('./previous-icon.png'),
+  // nextIcon: require('./next-icon.png'),
+  // icon: notificationIcon, // The notification icon
+}) => {
+  return TrackPlayer.updateOptions(options)
+}
+
+// export {
+//   useProgress,
+// }
+
+export { updateMetaData, initTrackInfo } from './playList'

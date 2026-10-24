@@ -1,0 +1,331 @@
+import { playList } from '@/core/player/player'
+import { useMemo, useRef, useState, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { FlatList, type NativeScrollEvent, type NativeSyntheticEvent, type FlatListProps } from 'react-native'
+
+import listState from '@/store/list/state'
+import playerState from '@/store/player/state'
+import { getListPosition, getListPrevSelectId, saveListPosition } from '@/utils/data'
+// import { useMusicList } from '@/store/list/hook'
+import { getListMusics, setActiveList } from '@/core/list'
+import ListItem, { ITEM_HEIGHT } from './ListItem'
+import { createStyle, getRowInfo } from '@/utils/tools'
+import { usePlayInfo, usePlayMusicInfo } from '@/store/player/hook'
+import type { Position } from './ListMenu'
+import type { SelectMode } from './MultipleModeBar'
+import { useActiveListId } from '@/store/list/hook'
+import { useSettingValue } from '@/store/setting/hook'
+import { useWindowSize } from '@/utils/hooks'
+
+type FlatListType = FlatListProps<LX.Music.MusicInfo>
+
+export interface ListProps {
+  onShowMenu: (musicInfo: LX.Music.MusicInfo, index: number, position: Position) => void
+  onMuiltSelectMode: () => void
+  onSelectAll: (isAll: boolean) => void
+}
+export interface ListType {
+  setIsMultiSelectMode: (isMultiSelectMode: boolean) => void
+  setSelectMode: (mode: SelectMode) => void
+  selectAll: (isAll: boolean) => void
+  getSelectedList: () => LX.List.ListMusics
+  scrollToInfo: (info: LX.Music.MusicInfo) => void
+  scrollToTop: () => void
+}
+
+const usePlayIndex = () => {
+  const activeListId = useActiveListId()
+  const playMusicInfo = usePlayMusicInfo()
+  const playInfo = usePlayInfo()
+
+  const playIndex = useMemo(() => {
+    return playMusicInfo.listId == activeListId ? playInfo.playIndex : -1
+  }, [activeListId, playInfo.playIndex, playMusicInfo.listId])
+
+  return playIndex
+}
+
+
+const List = forwardRef<ListType, ListProps>(({ onShowMenu, onMuiltSelectMode, onSelectAll }, ref) => {
+  // const t = useI18n()
+  const flatListRef = useRef<FlatList>(null)
+  const [currentList, setList] = useState<LX.List.ListMusics>([])
+  const listFirstScrollRef = useRef(false)
+  const isMultiSelectModeRef = useRef(false)
+  const selectModeRef = useRef<SelectMode>('single')
+  const prevSelectIndexRef = useRef(-1)
+  const [selectedList, setSelectedList] = useState<LX.List.ListMusics>([])
+  const selectedListRef = useRef<LX.List.ListMusics>([])
+  const currentListIdRef = useRef('')
+  const waitJumpListPositionRef = useRef(false)
+  // 排数跟随旋转：useWindowSize 订阅 windowSizeTools 尺寸事件（与排行榜
+  // useHorizontalMode 同一响应链）；useRef 只在挂载时算一次，旋转后排数冻结
+  const windowSize = useWindowSize()
+  const rowInfo = useMemo(() => getRowInfo('full', windowSize), [windowSize])
+  // 下方 useEffect([]) 闭包捕获的是挂载时值，滚动定位经此镜像读最新排数
+  const rowInfoRef = useRef(rowInfo)
+  rowInfoRef.current = rowInfo
+  const isShowAlbumName = useSettingValue('list.isShowAlbumName')
+  const isShowInterval = useSettingValue('list.isShowInterval')
+  useImperativeHandle(ref, () => ({
+    setIsMultiSelectMode(isMultiSelectMode) {
+      isMultiSelectModeRef.current = isMultiSelectMode
+      if (!isMultiSelectMode) {
+        prevSelectIndexRef.current = -1
+        handleUpdateSelectedList([])
+      }
+    },
+    setSelectMode(mode) {
+      selectModeRef.current = mode
+    },
+    selectAll(isAll) {
+      let list: LX.List.ListMusics
+      if (isAll) {
+        list = [...currentList]
+      } else {
+        list = []
+      }
+      selectedListRef.current = list
+      setSelectedList(list)
+    },
+    getSelectedList() {
+      return selectedListRef.current
+    },
+    scrollToInfo(info) {
+      void getListMusics(listState.activeListId).then((list) => {
+        const index = list.findIndex(m => m.id == info.id)
+        if (index < 0) return
+        flatListRef.current?.scrollToIndex({ index: Math.floor(index / (rowInfo.rowNum ?? 1)), viewPosition: 0.3, animated: true })
+      })
+    },
+    scrollToTop() {
+      flatListRef.current?.scrollToOffset({
+        offset: 0,
+        animated: true,
+      })
+    },
+  }))
+
+  useEffect(() => {
+    let isUpdateingList = true
+    const updateList = (id: string) => {
+      if (currentListIdRef.current == id) return
+      isUpdateingList = true
+      setList([])
+      currentListIdRef.current = id
+      void Promise.all([getListMusics(id), getListPosition(id)]).then(([list, position]) => {
+        requestAnimationFrame(() => {
+          if (currentListIdRef.current != id) return
+          selectedListRef.current = []
+          setSelectedList([])
+          setList([...list])
+          requestAnimationFrame(() => {
+            isUpdateingList = false
+            listFirstScrollRef.current = true
+            if (waitJumpListPositionRef.current) {
+              waitJumpListPositionRef.current = false
+              if (playerState.playMusicInfo.listId == id && playerState.playInfo.playIndex > -1) {
+                try {
+                  flatListRef.current?.scrollToIndex({ index: Math.floor(playerState.playInfo.playIndex / (rowInfoRef.current.rowNum ?? 1)), viewPosition: 0.3, animated: false })
+                  return
+                } catch {}
+              }
+            }
+            flatListRef.current?.scrollToOffset({ offset: position, animated: false })
+          })
+        })
+      })
+    }
+    const handleChange = (ids: string[]) => {
+      if (!ids.includes(listState.activeListId)) return
+      const id = listState.activeListId
+      void getListMusics(id).then((list) => {
+        if (currentListIdRef.current != id) return
+        selectedListRef.current = []
+        setSelectedList([])
+        setList([...list])
+      })
+    }
+
+    const handleJumpPosition = () => {
+      requestAnimationFrame(() => {
+        const listId = playerState.playMusicInfo.listId
+        if (!listId) return
+        if (listId != listState.activeListId) {
+          setActiveList(listId)
+          if (currentListIdRef.current != listId) waitJumpListPositionRef.current = true
+        } else if (playerState.playInfo.playIndex > -1) {
+          if (isUpdateingList) waitJumpListPositionRef.current = true
+          else {
+            try {
+              flatListRef.current?.scrollToIndex({ index: Math.floor(playerState.playInfo.playIndex / (rowInfoRef.current.rowNum ?? 1)), viewPosition: 0.3, animated: true })
+            } catch {}
+          }
+        }
+      })
+    }
+    if (global.lx.jumpMyListPosition) {
+      global.lx.jumpMyListPosition = false
+      if (playerState.playMusicInfo.listId) {
+        waitJumpListPositionRef.current = true
+        updateList(playerState.playMusicInfo.listId)
+      } else void getListPrevSelectId().then(updateList)
+    } else void getListPrevSelectId().then(updateList)
+
+    global.state_event.on('mylistToggled', updateList)
+    global.app_event.on('myListMusicUpdate', handleChange)
+    global.app_event.on('jumpListPosition', handleJumpPosition)
+
+    return () => {
+      global.state_event.off('mylistToggled', updateList)
+      global.app_event.off('myListMusicUpdate', handleChange)
+      global.app_event.off('jumpListPosition', handleJumpPosition)
+    }
+  }, [])
+
+  const activeIndex = usePlayIndex()
+  const handlePlay = (index: number) => {
+    void playList(listState.activeListId, index)
+  }
+
+  const handleUpdateSelectedList = (newList: LX.List.ListMusics) => {
+    if (selectedListRef.current.length && newList.length == currentList.length) onSelectAll(true)
+    else if (selectedListRef.current.length == currentList.length) onSelectAll(false)
+    selectedListRef.current = newList
+    setSelectedList(newList)
+  }
+  const handleSelect = (item: LX.Music.MusicInfo, pressIndex: number) => {
+    let newList: LX.List.ListMusics
+    if (selectModeRef.current == 'single') {
+      prevSelectIndexRef.current = pressIndex
+      const index = selectedListRef.current.indexOf(item)
+      if (index < 0) {
+        newList = [...selectedListRef.current, item]
+      } else {
+        newList = [...selectedListRef.current]
+        newList.splice(index, 1)
+      }
+    } else {
+      if (selectedListRef.current.length) {
+        const prevIndex = prevSelectIndexRef.current
+        const currentIndex = pressIndex
+        if (prevIndex == currentIndex) {
+          newList = []
+        } else if (currentIndex > prevIndex) {
+          newList = currentList.slice(prevIndex, currentIndex + 1)
+        } else {
+          newList = currentList.slice(currentIndex, prevIndex + 1)
+          newList.reverse()
+        }
+      } else {
+        newList = [item]
+        prevSelectIndexRef.current = pressIndex
+      }
+    }
+
+    handleUpdateSelectedList(newList)
+  }
+
+  const handlePress = (item: LX.Music.MusicInfo, index: number) => {
+    requestAnimationFrame(() => {
+      if (!global.lx.homePagerIdle) return
+      if (isMultiSelectModeRef.current) {
+        handleSelect(item, index)
+      } else {
+        handlePlay(index)
+      }
+    })
+  }
+
+  const handleLongPress = (item: LX.Music.MusicInfo, index: number) => {
+    if (isMultiSelectModeRef.current) return
+    prevSelectIndexRef.current = index
+    handleUpdateSelectedList([item])
+    onMuiltSelectMode()
+  }
+
+  /**
+   * 滚动位置只在「离开列表」时落一次盘。
+   *
+   * 以前 `onScroll` 里直接调 `saveListPosition`，而它内部是「1000ms 节流 +
+   * 每次把整份位置表 JSON.stringify 后写 AsyncStorage」——滚动期间等于每秒一次
+   * JS↔Native 桥 IO，低端机上直接体现为掉帧；而且滚动刚停时的那一次可能被节流
+   * 窗口吞掉，位置反而记不准。
+   *
+   * 现在滚动只更新 ref（零开销），切列表 / 卸载时 flush 一次。
+   */
+  const scrollOffsetRef = useRef(0)
+  const flushScrollOffset = useCallback(() => {
+    void saveListPosition(listState.activeListId, scrollOffsetRef.current)
+  }, [])
+  useEffect(() => {
+    // 切换列表或离开页面时保存
+    return flushScrollOffset
+  }, [flushScrollOffset])
+
+  const handleScroll = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (listFirstScrollRef.current) {
+      listFirstScrollRef.current = false
+      return
+    }
+    scrollOffsetRef.current = nativeEvent.contentOffset.y
+  }
+
+  /** 选中 id 集合：多选时"这一行是否被选"用 Set 判断是 O(1)，避免每行线性扫描 */
+  const selectedIdSet = useMemo(
+    () => new Set(selectedList.map(m => m.id)),
+    [selectedList],
+  )
+
+  const renderItem: FlatListType['renderItem'] = ({ item, index }) => (
+    <ListItem
+      item={item}
+      index={index}
+      activeIndex={activeIndex}
+      onPress={handlePress}
+      onLongPress={handleLongPress}
+      onShowMenu={onShowMenu}
+      selectedList={selectedList}
+      selectedIdSet={selectedIdSet}
+      rowInfo={rowInfo}
+      isShowAlbumName={isShowAlbumName}
+      isShowInterval={isShowInterval}
+    />
+  )
+  const getkey: FlatListType['keyExtractor'] = item => item.id
+  const getItemLayout: FlatListType['getItemLayout'] = (data, index) => {
+    return { length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index }
+  }
+
+  return (
+    <FlatList
+      key={String(rowInfo.rowNum ?? 1)}
+      ref={flatListRef}
+      onScroll={handleScroll}
+      style={styles.list}
+      data={currentList}
+      maxToRenderPerBatch={4}
+      numColumns={rowInfo.rowNum}
+      horizontal={false}
+      // updateCellsBatchingPeriod={80}
+      windowSize={8}
+      removeClippedSubviews={true}
+      initialNumToRender={12}
+      renderItem={renderItem}
+      keyExtractor={getkey}
+      extraData={activeIndex}
+      getItemLayout={getItemLayout}
+    />
+  )
+})
+
+const styles = createStyle({
+  container: {
+    flex: 1,
+  },
+  list: {
+    flexGrow: 1,
+    flexShrink: 1,
+  },
+})
+
+export default List
