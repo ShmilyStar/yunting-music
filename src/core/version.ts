@@ -2,7 +2,7 @@ import { compareVer } from '@/utils'
 import { downloadNewVersion, getVersionInfo } from '@/utils/version'
 import versionActions from '@/store/version/action'
 import versionState, { type InitState } from '@/store/version/state'
-import { getIgnoreVersion, getIgnoreVersionFailTipTime, saveIgnoreVersion, saveIgnoreVersionFailTipTime } from '@/utils/data'
+import { getIgnoreVersionFailTipTime, saveIgnoreVersionFailTipTime } from '@/utils/data'
 import { showVersionModal } from '@/navigation'
 import { Navigation } from 'react-native-navigation'
 import { toast } from '@/utils/tools'
@@ -19,6 +19,16 @@ export const hideModal = (componentId: string) => {
   void Navigation.dismissOverlay(componentId)
 }
 
+/**
+ * 检查更新。
+ *
+ * 只在两个时机触发（用户 2026-10-25 指定）：
+ *   1. App 启动时自动检查一次；
+ *   2. 用户在「设置 → 软件更新」点「检查更新」。
+ * 其余任何界面、任何时机都不再检查（不做定时轮询、不在切前台时重查）。
+ *
+ * 发现新版本一律弹窗询问，且弹窗不可忽略：点「否」直接退出 App。
+ */
 export const checkUpdate = async() => {
   versionActions.setVersionInfo({ status: 'checking' })
   let versionInfo: InitState['versionInfo'] = { ...versionState.versionInfo }
@@ -36,57 +46,55 @@ export const checkUpdate = async() => {
       history: [],
     }
   }
-  // const versionInfo = {
-  //   version: '1.9.0',
-  //   desc: '- 更新xxx\n- 修复xxx123的萨达修复xxx123的萨达修复xxx123的萨达修复xxx123的萨达修复xxx123的萨达',
-  //   history: [{ version: '1.8.0', desc: '- 更新xxx22\n- 修复xxx22' }, { version: '1.7.0', desc: '- 更新xxx22\n- 修复xxx22' }],
-  // }
+
   if (versionInfo.newVersion.version == '0.0.0') {
     versionInfo.isUnknown = true
     versionInfo.status = 'error'
   } else {
     versionInfo.status = 'idle'
     versionInfo.isUnknown = false
-    if (compareVer(versionInfo.version, versionInfo.newVersion.version) != -1) {
-      versionInfo.isLatest = true
-    }
+    // 每次检查都要重算，否则上一次的「已是最新」会粘住不放
+    versionInfo.isLatest = compareVer(versionInfo.version, versionInfo.newVersion.version) != -1
   }
 
   versionActions.setVersionInfo(versionInfo)
 
-  if (!versionInfo.isLatest) {
-    if (versionInfo.isUnknown) {
-      const time = await getIgnoreVersionFailTipTime()
-      if (Date.now() - time < 7 * 86400000) return
-      saveIgnoreVersionFailTipTime(Date.now())
-      toast(global.i18n.t('version_tip_unknown'))
-    } else if (versionInfo.newVersion.version != await getIgnoreVersion()) {
-      showModal()
-    }
+  if (versionInfo.isLatest) return
+
+  if (versionInfo.isUnknown) {
+    // 拿不到版本信息属于「无法判定」，不做强制更新，只提示
+    const time = await getIgnoreVersionFailTipTime()
+    if (Date.now() - time < 7 * 86400000) return
+    saveIgnoreVersionFailTipTime(Date.now())
+    toast(global.i18n.t('version_tip_unknown'))
+    return
   }
+
+  // 有新版本：弹窗，用户必须选择（点「否」即退出 App）
+  showModal()
 }
 
 /**
  * 下载新版本（Android 下载完成后由 `downloadNewVersion` 自动拉起系统安装界面）。
  *
- * 流程：点检查更新 → GitHub Release 有新版本 → 弹窗确认 → 后台下载 → 自动弹安装器，
+ * 流程：发现新版本 → 弹窗「是」→ 后台下载 → 自动弹安装器，
  * 「安装」最后一步由用户在系统界面手动确认。
  */
 export const downloadUpdate = () => {
+  const targetVer = versionState.versionInfo.newVersion?.version
+  // 没有版本号就退回 idle，否则会带着 undefined 去拼下载地址
+  if (!targetVer) {
+    versionActions.setVersionInfo({ status: 'idle' })
+    return
+  }
   versionActions.setVersionInfo({ status: 'downloading' })
   versionActions.setProgress({ total: 0, current: 0 })
 
-  downloadNewVersion(versionState.versionInfo.newVersion!.version, (total: number, current: number) => {
+  downloadNewVersion(targetVer, (total: number, current: number) => {
     versionActions.setProgress({ total, current })
   }).then(() => {
     versionActions.setVersionInfo({ status: 'downloaded' })
   }).catch(() => {
     versionActions.setVersionInfo({ status: 'error' })
   })
-}
-
-
-export const setIgnoreVersion = (version: InitState['ignoreVersion']) => {
-  versionActions.setIgnoreVersion(version)
-  saveIgnoreVersion(version)
 }

@@ -10,6 +10,7 @@ import { initDownload } from '@/core/download'
 import initCommonState from './common'
 import { initDeeplink } from './deeplink'
 import { setApiSource } from '@/core/apiSource'
+import { checkUpdate } from '@/core/version'
 import settingState from '@/store/setting/state'
 import { bootLog } from '@/utils/bootLog'
 import { cheatTip } from '@/utils/tools'
@@ -20,7 +21,12 @@ const handlePushedHomeScreen = async() => {
   if (settingState.setting['common.isAgreePact']) {
     if (isFirstPush) {
       isFirstPush = false
-      // 不再自动检测更新：只有用户在「设置 → 软件更新」里手动点开才检测
+      // 启动时自动检查一次更新（用户 2026-10-25 指定）。
+      // 全局只有两个检查时机：这里、以及「设置 → 软件更新」里的手动检查；
+      // 不做定时轮询，也不在切回前台时重查。
+      // 发现新版本会弹出强制更新窗口（点「否」退出 App），
+      // 所以必须等界面就绪后再调，避免和协议弹窗抢 overlay。
+      void checkUpdate().catch(() => { /* 检查失败不阻塞启动 */ })
       void initDeeplink()
     }
   } else {

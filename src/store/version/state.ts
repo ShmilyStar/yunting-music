@@ -35,7 +35,13 @@ const state: InitState = {
     reCheck: false,
     isUnknown: false,
     isLatest: false,
-    status: 'checking',
+    /**
+     * 初始必须是 idle。
+     *
+     * 之前这里是 'checking'，但没有任何地方在启动时真的发起检查，设置页
+     * 一进来就永久显示「检查更新中」，按钮也被 isChecking 禁用。
+     */
+    status: 'idle',
   },
   ignoreVersion: null,
   progress: {

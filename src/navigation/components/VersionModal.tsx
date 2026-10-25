@@ -1,207 +1,111 @@
-import { useMemo, useState, useEffect, memo } from 'react'
+import { useEffect, useState, memo } from 'react'
 import { View, ScrollView } from 'react-native'
 
-import { compareVer, sizeFormate } from '@/utils'
-
 import Button from '@/components/common/Button'
-import { updateApp } from '@/utils/version'
+import { sizeFormate } from '@/utils'
 import { createStyle } from '@/utils/tools'
 import { useTheme } from '@/store/theme/hook'
-import { type VersionInfo } from '@/store/version/state'
 import Text from '@/components/common/Text'
 import { useI18n } from '@/lang'
-import { useVersionDownloadProgressUpdated, useVersionInfo, useVersionInfoIgnoreVersionUpdated } from '@/store/version/hook'
+import { useVersionDownloadProgressUpdated, useVersionInfo } from '@/store/version/hook'
+import { downloadUpdate } from '@/core/version'
+import { updateApp } from '@/utils/version'
+import { exitApp } from '@/utils/nativeModules/utils'
 import ModalContent from './ModalContent'
-import { checkUpdate, downloadUpdate, hideModal, setIgnoreVersion } from '@/core/version'
-
-const VersionItem = ({ version, desc }: VersionInfo) => {
-  return (
-    <View style={styles.versionItem}>
-      <Text style={styles.label}>v{version}</Text>
-      <Text selectable style={styles.desc}>{desc}</Text>
-    </View>
-  )
-}
-
-const Content = memo(({ title, newVersionInfo }: {
-  title: string
-  newVersionInfo: VersionInfo | null
-}) => {
-  const t = useI18n()
-
-  const history = useMemo(() => {
-    if (!newVersionInfo?.history) return []
-    let arr = []
-    for (const ver of newVersionInfo?.history) {
-      if (compareVer(currentVer, ver.version) < 0) arr.push(ver)
-    }
-    return arr
-  }, [newVersionInfo])
-
-  return (
-    <View style={styles.main}>
-      <Text style={styles.title}>{title}</Text>
-      <ScrollView style={styles.content} keyboardShouldPersistTaps={'always'}>
-        <Text style={styles.label}>{t('version_label_latest_ver')}{newVersionInfo?.version}</Text>
-        <Text style={styles.label}>{t('version_label_current_ver')}{currentVer}</Text>
-        {
-          newVersionInfo?.desc
-            ? (
-                <View>
-                  <Text style={styles.label}>{t('version_label_change_log')}</Text>
-                  <View style={{ paddingLeft: 10, marginTop: 5 }}>
-                    <Text selectable style={styles.desc}>{newVersionInfo.desc}</Text>
-                  </View>
-                </View>
-              )
-            : null
-        }
-        {
-          history.length
-            ? (
-                <View style={styles.history}>
-                  <Text style={styles.label}>{t('version_label_history')}</Text>
-                  <View style={{ paddingLeft: 10, marginTop: 5 }}>
-                    {history.map((item, index) => <VersionItem key={`${item.version}-${index}`} version={item.version} desc={item.desc} />)}
-                  </View>
-                </View>
-              )
-            : null
-        }
-      </ScrollView>
-    </View>
-  )
-})
 
 const currentVer = process.versions.app
-const VersionModal = ({ componentId }: { componentId: string }) => {
+
+/**
+ * 「发现新版本」强制更新弹窗。
+ *
+ * 用户 2026-10-25 指定：
+ *   - 只在「启动自动检查」和「设置里点检查更新」两处触发；
+ *   - 发现新版本弹本窗口，内容为「发现新版本 xxx，是否更新」；
+ *   - 点「否」直接退出 App，不更新不能继续使用；
+ *   - 点「是」后自动下载并拉起系统安装器替换安装。
+ *
+ * 因此这里**没有**「忽略 / 稍后 / 关闭」这类出口：取消按钮的唯一动作就是
+ * 退出应用。沿用 v1.0.3 的 overlay 弹窗载体（ModalContent），但去掉了原来
+ * 的「忽略版本」按钮与关闭语义。
+ */
+const VersionModal = ({ componentId: _componentId }: { componentId: string }) => {
   const theme = useTheme()
   const t = useI18n()
   const versionInfo = useVersionInfo()
   const progress = useVersionDownloadProgressUpdated()
-  const ignoreVersion = useVersionInfoIgnoreVersionUpdated()
-  const [ignoreBtn, setIgnoreBtn] = useState({ text: t('version_btn_ignore'), show: true, disabled: false })
-  const [closeBtnText, setCloseBtnText] = useState(t('version_btn_close'))
-  const [confirmBtn, setConfirmBtn] = useState({ text: '', show: true, disabled: false })
-  const [title, setTitle] = useState('')
   const [tip, setTip] = useState('')
 
+  const newVersion = versionInfo.newVersion?.version
+  const isDownloading = versionInfo.status == 'downloading'
+  const isDownloaded = versionInfo.status == 'downloaded'
 
   useEffect(() => {
-    let ignoreBtnConfig = { ...ignoreBtn }
-    if (versionInfo.isLatest) {
-      setTitle(t('version_title_latest'))
-      setTip('')
-      ignoreBtnConfig.show = false
-      setConfirmBtn({ text: t('version_btn_new'), show: false, disabled: true })
-      setCloseBtnText(t('version_btn_close'))
-    } else if (versionInfo.isUnknown) {
-      setTitle(t('version_title_unknown'))
-      setTip(t('version_tip_unknown'))
-      ignoreBtnConfig.show = false
-      setConfirmBtn({ text: t('version_btn_failed'), show: true, disabled: false })
-      setCloseBtnText(t('version_btn_close'))
-    } else {
-      switch (versionInfo.status) {
-        case 'downloading':
-          setTitle(t('version_title_new'))
-          setTip(t('version_btn_downloading', {
-            total: sizeFormate(progress.total),
-            current: sizeFormate(progress.current),
-            progress: progress.total ? (progress.current / progress.total * 100).toFixed(2) : '0',
-          }))
-          if (ignoreBtnConfig.show) ignoreBtnConfig.show = false
-          if (!confirmBtn.disabled) setConfirmBtn({ text: t('version_btn_update'), show: true, disabled: true })
-          setCloseBtnText(t('version_btn_min'))
-          break
-        case 'downloaded':
-          setTitle(t('version_title_update'))
-          setTip('')
-          if (ignoreBtnConfig.show) ignoreBtnConfig.show = false
-          setConfirmBtn({ text: t('version_btn_update'), show: true, disabled: false })
-          setCloseBtnText(t('version_btn_close'))
-          break
-        case 'checking':
-          setTitle(t('version_title_checking'))
-          setTip('')
-          ignoreBtnConfig.show = false
-          setConfirmBtn({ text: t('version_btn_new'), show: false, disabled: true })
-          setCloseBtnText(t('version_btn_close'))
-          break
-        case 'error':
-          setTitle(t('version_title_failed'))
-          setTip(t('version_tip_failed'))
-          ignoreBtnConfig.show = true
-          ignoreBtnConfig.disabled = false
-          setConfirmBtn({ text: t('version_btn_failed'), show: true, disabled: false })
-          setCloseBtnText(t('version_btn_close'))
-          break
-        // case 'idle':
-        //   break
-        default:
-          setTitle(t('version_title_new'))
-          setTip('')
-          ignoreBtnConfig.show = true
-          ignoreBtnConfig.disabled = false
-          setConfirmBtn({ text: t('version_btn_new'), show: true, disabled: false })
-          // setTip(t('version_btn_new'))
-          setCloseBtnText(t('version_btn_close'))
-          break
-      }
+    switch (versionInfo.status) {
+      case 'downloading':
+        setTip(t('version_btn_downloading', {
+          total: sizeFormate(progress.total),
+          current: sizeFormate(progress.current),
+          progress: progress.total ? (progress.current / progress.total * 100).toFixed(2) : '0',
+        }))
+        break
+      case 'downloaded':
+        setTip(t('version_title_update'))
+        break
+      case 'error':
+        setTip(t('version_tip_failed'))
+        break
+      default:
+        setTip('')
+        break
     }
-    ignoreBtnConfig.text = t(ignoreVersion == versionInfo.newVersion?.version ? 'version_btn_ignore_cancel' : 'version_btn_ignore')
-    setIgnoreBtn(ignoreBtnConfig)
+  }, [t, versionInfo.status, progress])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [t, versionInfo, ignoreVersion, progress])
-
-  const handleCancel = () => {
-    hideModal(componentId)
-  }
-  const handleIgnore = () => {
-    // 未知/出错态 newVersion 可能为 null，直接断言会崩（点「忽略」即闪退）
-    const version = versionInfo.newVersion?.version
-    if (!version) return
-    setIgnoreVersion(ignoreVersion != version ? version : null)
-    // handleCancel()
+  /** 点「否」：不更新就不能使用，直接退出应用 */
+  const handleNo = () => {
+    // UtilsModule.exitApp 在 Android 上是杀掉进程并结束 Activity，
+    // iOS 侧同样实现了退出；失败也不应卡住用户，兜底再调一次
+    try {
+      exitApp()
+    } catch (e) {
+      exitApp()
+    }
   }
 
-  const handleConfirm = () => {
-    if (versionInfo.isLatest || versionInfo.isUnknown) {
-      void checkUpdate()
-    } else if (versionInfo.status == 'downloaded') {
+  /** 点「是」：下载 → 下载完自动拉起安装器 */
+  const handleYes = () => {
+    if (isDownloading) return
+    if (isDownloaded) {
       void updateApp()
-    } else if (versionInfo.status == 'idle' || versionInfo.status == 'error') {
-      downloadUpdate()
+      return
     }
+    downloadUpdate()
   }
+
+  const confirmText = isDownloaded ? t('version_btn_update') : t('version_force_yes')
 
   return (
     <ModalContent>
-      <Content title={title} newVersionInfo={versionInfo.newVersion} />
-      { tip.length ? <Text style={styles.tip} color={theme['c-primary-font']}>{tip}</Text> : null }
+      <View style={styles.main}>
+        <Text style={styles.title}>{t('version_force_title', { version: newVersion ?? '' })}</Text>
+        <ScrollView style={styles.content} keyboardShouldPersistTaps={'always'}>
+          <Text style={styles.label}>{t('version_label_latest_ver')}{newVersion}</Text>
+          <Text style={styles.label}>{t('version_label_current_ver')}{currentVer}</Text>
+          <View style={{ marginTop: 10 }}>
+            <Text style={styles.desc}>{t('version_force_tip')}</Text>
+          </View>
+          {tip ? <Text style={{ ...styles.desc, marginTop: 8 }}>{tip}</Text> : null}
+        </ScrollView>
+      </View>
       <View style={styles.btns}>
-        {
-          ignoreBtn.show
-            ? (
-                <Button disabled={ignoreBtn.disabled} style={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} onPress={handleIgnore}>
-                  <Text color={theme['c-button-font']}>{ignoreBtn.text}</Text>
-                </Button>
-              )
-            : null
-        }
-        <Button style={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} onPress={handleCancel}>
-          <Text color={theme['c-button-font']}>{closeBtnText}</Text>
+        <Button style={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} onPress={handleNo}>
+          <Text color={theme['c-button-font']}>{t('version_force_no')}</Text>
         </Button>
-        {
-          confirmBtn.show
-            ? (
-                <Button disabled={confirmBtn.disabled} style={{ ...styles.btn, backgroundColor: theme['c-button-background'] }} onPress={handleConfirm}>
-                  <Text color={theme['c-button-font']}>{confirmBtn.text}</Text>
-                </Button>
-              )
-            : null
-        }
+        <Button
+          disabled={isDownloading}
+          style={{ ...styles.btn, backgroundColor: theme['c-button-background'] }}
+          onPress={handleYes}>
+          <Text color={theme['c-button-font']}>{confirmText}</Text>
+        </Button>
       </View>
     </ModalContent>
   )
@@ -209,7 +113,6 @@ const VersionModal = ({ componentId }: { componentId: string }) => {
 
 const styles = createStyle({
   main: {
-    // flexGrow: 0,
     flexShrink: 1,
     marginTop: 15,
     marginLeft: 15,
@@ -224,31 +127,19 @@ const styles = createStyle({
     textAlign: 'center',
     marginBottom: 15,
   },
-  history: {
-    marginTop: 15,
-  },
-  versionItem: {
-    marginBottom: 10,
-  },
   label: {
     fontSize: 14,
     marginBottom: 2,
   },
   desc: {
     fontSize: 13,
-    lineHeight: 18,
-  },
-  tip: {
-    paddingLeft: 15,
-    paddingRight: 15,
-    paddingBottom: 10,
+    lineHeight: 19,
   },
   btns: {
     flexDirection: 'row',
     justifyContent: 'center',
     paddingBottom: 15,
     paddingLeft: 15,
-    // paddingRight: 15,
   },
   btn: {
     flex: 1,
@@ -262,5 +153,4 @@ const styles = createStyle({
   },
 })
 
-export default VersionModal
-
+export default memo(VersionModal)
