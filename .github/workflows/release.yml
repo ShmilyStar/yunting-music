@@ -1,10 +1,33 @@
-name: Build
+name: Build & Release
 
-# Android + iOS 全量发布（iOS 那份也可由 ios-release.yml 单独跑）。
-# 仅在手动触发：Android 作业需要仓库 Secrets（KEYSTORE_STORE_FILE / KEYSTORE_KEY_ALIAS /
-# KEYSTORE_PASSWORD / KEYSTORE_KEY_PASSWORD），没配之前 push 触发会直接失败。
+# 发布唯一入口：**推送代码即可**，不再需要本地构建。
+#
+# 触发：
+#   - push 到 main 且 package.json 的版本号还没有对应 tag → 自动构建并发布
+#   - 手动触发（可选传入版本号，或在版本号已发过时强制重建）
+#
+# 做的事：
+#   1. Android：构建 5 个 ABI 的 APK
+#   2. iOS：在 macOS 上构建未签名 IPA
+#   3. 两者都完成后，创建/更新 vX.Y.Z 的 Release 并上传全部产物
+#
+# 关于签名：本仓库没有 keystore.properties 也没有 keystore Secrets，
+# android/app/build.gradle 会回退到 app/debug.keystore 签名（与历次发布一致，
+# 老用户可覆盖安装）。要换成正式 keystore，再配置 4 个 Secrets 即可，无需改本文件。
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
+    inputs:
+      force:
+        description: '版本号已发布过时仍然重建（true/false）'
+        required: false
+        default: 'false'
+
+permissions:
+  # 推 tag、创建 Release、上传产物都需要写权限
+  contents: write
 
 jobs:
   CheckVersion:
@@ -12,6 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.check.outputs.should_run }}
+      version: ${{ steps.check.outputs.version }}
     steps:
       - name: Check out git repository
         uses: actions/checkout@v7
@@ -22,11 +46,20 @@ jobs:
         id: check
         run: |
           PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+
           if git tag -l "v${PACKAGE_VERSION}" | grep -q .; then
-            echo "Tag v${PACKAGE_VERSION} already exists, skip release"
-            echo "should_run=false" >> $GITHUB_OUTPUT
+            # 版本号已经发过：只有手动触发并勾了 force 才重建，避免每次 push 都重复发版
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+              echo "Tag v${PACKAGE_VERSION} exists but force=true, rebuild"
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "Tag v${PACKAGE_VERSION} already exists, skip（发新版请先改 package.json 的版本号）"
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            fi
           else
-            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "Tag v${PACKAGE_VERSION} not found, will build and release"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
 
   Android:
@@ -47,9 +80,22 @@ jobs:
         shell: bash
         run: |
           cd android
-          echo ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }} | base64 --decode > app/${{ secrets.KEYSTORE_STORE_FILE }}
-          ./gradlew assembleRelease -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
-          rm -f app/${{ secrets.KEYSTORE_STORE_FILE }}
+
+          # 有 keystore Secrets 就用正式签名；没有则直接用 debug.keystore
+          # （build.gradle 的 signingConfigs.release 会自动回退，这里无需任何参数）。
+          if [ -n "${{ secrets.KEYSTORE_STORE_FILE_BASE64 }}" ]; then
+            echo "使用仓库 Secrets 中的 keystore"
+            echo '${{ secrets.KEYSTORE_STORE_FILE_BASE64 }}' | base64 --decode > "app/${{ secrets.KEYSTORE_STORE_FILE }}"
+            ./gradlew assembleRelease \
+              -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' \
+              -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' \
+              -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' \
+              -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
+            rm -f "app/${{ secrets.KEYSTORE_STORE_FILE }}"
+          else
+            echo "未配置 keystore Secrets，使用 app/debug.keystore 签名（与历史发布一致）"
+            ./gradlew assembleRelease
+          fi
 
       # Push tag to GitHub if package.json version's tag is not tagged
       - name: Get package version
@@ -129,9 +175,16 @@ jobs:
       - name: 打包 IPA
         working-directory: ios/build/Build/Products/Release-iphoneos
         run: |
-          mkdir Payload
-          cp -r LxMusicMobile.app Payload/
-          zip -qry yunting-music-v${{ env.PACKAGE_VERSION }}-unsigned.ipa Payload
+          rm -rf Payload
+          mkdir -p Payload
+          # 用 ditto 而不是 cp -r：完整保留符号链接与资源分叉，与 macOS 系统打包一致。
+          # 第三方签名工具对 cp -r 打出的 symlink 支持不好，容易报「解压失败」。
+          ditto LxMusicMobile.app Payload/LxMusicMobile.app
+          NAME="yunting-music-v${{ env.PACKAGE_VERSION }}-unsigned.ipa"
+          # -y 保留符号链接为链接（framework 所必需）
+          zip -qry "$NAME" Payload
+          ls -lh "$NAME"
+          unzip -l "$NAME" | head -20
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
@@ -236,9 +289,12 @@ jobs:
   Release:
     name: Release
     runs-on: ubuntu-latest
-    # needs: [Android, Android_SL]
     needs: [CheckVersion, Android, iOS]
-    if: needs.CheckVersion.outputs.should_run == 'true'
+    # 两个构建并行跑，任一失败也要发布另一边已构建成功的产物，
+    # 所以用 always() 而不是默认的「全部成功」。版本检查没过才真的跳过。
+    if: |
+      always() && needs.CheckVersion.outputs.should_run == 'true' &&
+      (needs.Android.result == 'success' || needs.iOS.result == 'success')
     steps:
       - name: Check out git repository
         uses: actions/checkout@v7
@@ -249,13 +305,23 @@ jobs:
           path: ./artifacts
           merge-multiple: true
 
+      - name: List downloaded artifacts
+        run: ls -lh ./artifacts
+
       - name: Generate file MD5
         run: |
           echo -e '\n### File MD5\n```' >> ./publish/changeLog.md
           cd artifacts
-          md5sum *.apk *.ipa >> ../publish/changeLog.md
+          # 只对真实存在的产物做校验（某个平台构建失败时不会有对应文件）
+          shopt -s nullglob
+          FILES=(*.apk *.ipa)
+          if [ ${#FILES[@]} -gt 0 ]; then
+            md5sum "${FILES[@]}" >> ../publish/changeLog.md
+          else
+            echo '(no artifacts)' >> ../publish/changeLog.md
+          fi
           echo -e '```\n' >> ../publish/changeLog.md
-          echo -e '\n本仓库签名与上游不同，从上游版本覆盖安装需先卸载。\n\n[软件安装包说明](https://lyswhut.github.io/lx-music-doc/download#%E8%BD%AF%E4%BB%B6%E5%AE%89%E8%A3%85%E5%8C%85%E8%AF%B4%E6%98%8E)\n' >> ../publish/changeLog.md
+          echo -e '\n本仓库签名与上游不同，从上游版本覆盖安装需先卸载。\n' >> ../publish/changeLog.md
 
       - name: Get package version
         run: |
@@ -268,16 +334,12 @@ jobs:
           body_path: ./publish/changeLog.md
           prerelease: false
           draft: false
+          # Release 已存在时（补传产物 / 重跑）覆盖同名附件，而不是报错
+          fail_on_unmatched_files: false
           tag_name: v${{ env.PACKAGE_VERSION }}
+          # 用通配符收集：某个平台构建失败时，另一边仍能正常发布
           files: |
-            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-arm64-v8a.apk
-            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-armeabi-v7a.apk
-            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-x86_64.apk
-            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-x86.apk
-            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-universal.apk
-            artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-unsigned.ipa
-
-          # artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-sl-arm64-v8a.apk
-          # artifacts/yunting-music-v${{ env.PACKAGE_VERSION }}-android_5-universal.apk
+            artifacts/*.apk
+            artifacts/*.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
