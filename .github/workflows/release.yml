@@ -81,6 +81,12 @@ jobs:
         run: |
           cd android
 
+          # gradlew 在仓库里是 100644（Windows 提交时丢了可执行位），
+          # 直接 ./gradlew 会报 "Permission denied"（exit 126）。
+          # 这里就地补权限，并对 CRLF 做一次兜底处理，避免 checkout 转换踩坑。
+          chmod +x gradlew
+          sed -i 's/\r$//' gradlew
+
           # 有 keystore Secrets 就用正式签名；没有则直接用 debug.keystore
           # （build.gradle 的 signingConfigs.release 会自动回退，这里无需任何参数）。
           if [ -n "${{ secrets.KEYSTORE_STORE_FILE_BASE64 }}" ]; then
