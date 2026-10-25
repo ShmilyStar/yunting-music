@@ -26,5 +26,10 @@
 ### 文件 MD5
 
 ```
-（构建完成后填写）
+5c57565a150abc2949542b201b5f14bd  yunting-music-v1.0.3-arm64-v8a.apk
+2423068fa10177f12916391526c4f8d6  yunting-music-v1.0.3-armeabi-v7a.apk
+082bd846142d1a8f8556bc02a1503eca  yunting-music-v1.0.3-x86.apk
+0aa4e16a29f3b0233f8ae3444a78e412  yunting-music-v1.0.3-x86_64.apk
+e30cf31730e0f57a86261310149d353e  yunting-music-v1.0.3-universal.apk
+b77679e5a7b303cfcc785619a57f6947  yunting-music-v1.0.3-unsigned.ipa
 ```
