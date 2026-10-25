@@ -1,9 +1,9 @@
 name: iOS Unsigned IPA
 
-# 只负责「构建未签名 IPA 并上传为 Artifact」，**不创建任何 Release**。
+# 构建未签名 IPA：上传为 Artifact，并在对应版本的 Release 已存在时
+# 直接把 IPA 挂上去（不需要再手动下载再上传）。
 #
-# 与 `ios-release.yml` 的区别：那个会在 tag/push 后自动建 Release 并挂载产物，
-# 这里刻意去掉 release 环节，仅供内部验证与手动取包。
+# 不会凭空创建 Release：Release 由发版流程创建，这里只做「补挂附件」。
 #
 # 触发方式：
 #   - 手动（Actions 页面 Run workflow）
@@ -23,7 +23,8 @@ on:
       - '.github/workflows/ios-unsigned-ipa.yml'
 
 permissions:
-  contents: read
+  # read：checkout；write：把 IPA 直接挂到对应版本的 Release 上
+  contents: write
 
 jobs:
   ipa:
@@ -98,3 +99,30 @@ jobs:
           path: ios/build/Build/Products/Release-iphoneos/*.ipa
           if-no-files-found: error
           retention-days: 30
+
+      # 直接把 IPA 挂到对应版本的 Release 上，不必再手动下载再上传。
+      #
+      # 行为：
+      #   - Release 已存在（正常发版流程）→ 上传/覆盖同名附件
+      #   - Release 不存在（只是跑构建验证）→ 跳过，不凭空创建 Release
+      - name: 上传 IPA 到 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          TAG="v${VERSION}"
+          IPA=$(ls ios/build/Build/Products/Release-iphoneos/*.ipa | head -n1)
+          echo "IPA: $IPA"
+
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release ${TAG} 不存在，跳过上传（本次仅构建验证）"
+            exit 0
+          fi
+
+          # 同名附件已存在时先删除，避免重复堆积（gh 不覆盖同名资产）
+          gh release delete-asset "$TAG" "$(basename "$IPA")" \
+            --repo "$GITHUB_REPOSITORY" --yes >/dev/null 2>&1 || true
+
+          gh release upload "$TAG" "$IPA" --repo "$GITHUB_REPOSITORY" --clobber
+          echo "已上传 $(basename "$IPA") 到 Release ${TAG}"
