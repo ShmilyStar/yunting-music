@@ -7,11 +7,12 @@ import { useTheme } from '@/store/theme/hook'
 import { BorderWidths } from '@/theme'
 import { formatPlayTime2 } from '@/utils'
 import { Icon } from '@/components/common/Icon'
+import { offsetToLyricTime, LYRIC_PLAY_LINE_TOP, type LyricLayoutInfo } from './lyricLayout'
 
 
 export interface PlayLineType {
   updateScrollInfo: (scrollInfo: NativeSyntheticEvent<NativeScrollEvent>['nativeEvent'] | null) => void
-  updateLayoutInfo: (listLayoutInfo: { spaceHeight: number, lineHeights: number[] }) => void
+  updateLayoutInfo: (listLayoutInfo: LyricLayoutInfo) => void
   updateLyricLines: (lyricLines: Lines) => void
   setVisible: (visible: boolean) => void
 }
@@ -20,12 +21,32 @@ export interface PlayLineProps {
   onPlayLine: (time: number) => void
 }
 
+/**
+ * 当前播放行对应的播放时间（ms）。
+ *
+ * 拖拽歌词调整进度只需要取这个值（见两个歌词组件的 `onScrollEndDrag`），
+ * 不必挂组件；与 `PlayLine` 显示的标签、点击跳转用的是同一套换算。
+ */
+export const getLyricPlayTime = (
+  scrollInfo: NativeSyntheticEvent<NativeScrollEvent>['nativeEvent'] | null,
+  layout: LyricLayoutInfo,
+  lines: Lines,
+) => {
+  if (!scrollInfo) return null
+  return offsetToLyricTime(
+    scrollInfo.contentOffset.y,
+    scrollInfo.layoutMeasurement.height,
+    layout,
+    lines,
+  )
+}
+
 const ANIMATION_DURATION = 300
 
 export default forwardRef<PlayLineType, PlayLineProps>(({ onPlayLine }, ref) => {
   const theme = useTheme()
   const [scrollInfo, setScrollInfo] = useState<NativeSyntheticEvent<NativeScrollEvent>['nativeEvent'] | null>(null)
-  const [listLayoutInfo, setListLayoutInfo] = useState<{ spaceHeight: number, lineHeights: number[] }>({ spaceHeight: 0, lineHeights: [] })
+  const [listLayoutInfo, setListLayoutInfo] = useState<LyricLayoutInfo>({ spaceHeight: 0, lineHeights: [] })
   const [lyricLines, setLyricLines] = useState<Lines>([])
   const [visible, setVisible] = useState(false)
   const opsAnim = useRef<Animated.Value>(
@@ -68,20 +89,10 @@ export default forwardRef<PlayLineType, PlayLineProps>(({ onPlayLine }, ref) => 
   }
 
   if (!scrollInfo || !visible) return null
-  const offset = scrollInfo.contentOffset.y + scrollInfo.layoutMeasurement.height * 0.4
-  let lineOffset = listLayoutInfo.spaceHeight
-  let targetLineNum = -1
-  for (let line = 0; line < listLayoutInfo.lineHeights.length; line++) {
-    lineOffset += listLayoutInfo.lineHeights[line]
-    if (lineOffset < offset) continue
-    targetLineNum = line
-    break
-  }
-  if (targetLineNum == -1) targetLineNum = listLayoutInfo.lineHeights.length - 1
-  const time = lyricLines[targetLineNum]?.time ?? 0
+  const time = getLyricPlayTime(scrollInfo, listLayoutInfo, lyricLines) ?? 0
   const timeLabel = formatPlayTime2(time / 1000)
   return (
-    <Animated.View style={{ ...styles.playLine, opacity: opsAnim }}>
+    <Animated.View style={{ ...styles.playLine, top: LYRIC_PLAY_LINE_TOP, opacity: opsAnim }}>
       <Text style={styles.label} color={theme['c-primary-font']} size={13}>{timeLabel}</Text>
       <View style={styles.lineContent}>
         <View style={{ ...styles.line, borderBottomColor: theme['c-primary-alpha-700'] }} />
@@ -97,7 +108,7 @@ const styles = createStyle({
   playLine: {
     position: 'absolute',
     width: '100%',
-    top: '40%',
+    // top 由 LYRIC_PLAY_LINE_TOP 给出：与换算用的比例同一个数
     left: 0,
     height: 2,
     // paddingTop: 5,

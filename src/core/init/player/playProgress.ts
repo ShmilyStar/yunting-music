@@ -29,8 +29,14 @@ export default () => {
   const getCurrentTime = () => {
     let id = playerState.musicInfo.id
     void getPosition().then(position => {
-      if (!position || id != playerState.musicInfo.id) return
+      // `position` 是播放位置的秒数：0 是有效值（刚回到开头），
+      // 只有取不到（null/undefined）才跳过
+      if (position == null || id != playerState.musicInfo.id) return
       setNowPlayTime(position)
+      // 播放器上报的真实位置：歌词用它校正时间轴。seek 之后原生不回
+      // play 事件，歌词只能靠这里跟上。进度为 0 时同样要通知——
+      // 拖回开头（或重播开头）时那正是目标位置，跳过会让歌词停在原处
+      global.app_event.progress(position * 1000)
       if (!playerState.isPlay) return
 
       if (settingState.setting['player.isSavePlayTime'] && !playerState.playMusicInfo.isTempPlay && isScreenOn) {
@@ -70,8 +76,12 @@ export default () => {
 
   const setProgress = (time: number, maxTime?: number) => {
     if (!playerState.musicInfo.id) return
-    setNowPlayTime(time)
-    void setCurrentTime(time)
+    // 歌词通过 setProgress 事件在 seek 之前就已按目标位置落位
+    // （见 init/player/lyric.ts）。seek 完成后立即取一次真实位置回校，
+    // 不等下一拍轮询，把容器的进位误差修掉
+    void setCurrentTime(time).then(() => {
+      getCurrentTime()
+    })
 
     if (maxTime != null) setMaxplayTime(maxTime)
 

@@ -34,9 +34,11 @@ const defaultSetting: LX.AppSetting = {
   'player.isShowBluetoothFullLyric': false,
 
   // 'playDetail.isZoomActiveLrc': false,
-  // 'playDetail.isShowLyricProgressSetting': false,
   'playDetail.vertical.style.lrcFontSize': 210,
   'playDetail.horizontal.style.lrcFontSize': 220,
+  // 允许通过拖拽歌词调整播放进度：开启后手动滑动歌词会按播放行所在的
+  // 那句设置播放位置（见 `components/lyricLayout.ts`）。默认关闭，
+  // 避免「只想翻歌词看」的滑动顺手把播放位置带跑
   'playDetail.isShowLyricProgressSetting': false,
 
   'desktopLyric.enable': false,

@@ -53,6 +53,17 @@ export class AppEvent extends Event {
   }
 
   /**
+   * 播放进度刷新（播放器上报的真实播放位置）
+   *
+   * 与 `setProgress` 区分：`setProgress` 是「我要跳到某处」，`progress`
+   * 是「播放器现在真的在这里」。歌词时间轴按它校正，seek 后也能跟上。
+   * @param progress 当前播放位置（ms）
+   */
+  progress(progress: number) {
+    this.emit('progress', progress)
+  }
+
+  /**
    * 设置音量大小
    * @param volume 音量大小
    */

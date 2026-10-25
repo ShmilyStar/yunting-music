@@ -1,4 +1,4 @@
-import { init as initLyricPlayer, toggleTranslation, toggleRoma, play, pause, stop, setLyric, setPlaybackRate } from '@/core/lyric'
+import { init as initLyricPlayer, toggleTranslation, toggleRoma, play, pause, stop, setLyric, setPlaybackRate, handleSeek, handleProgress } from '@/core/lyric'
 import { updateSetting } from '@/core/common'
 import { onDesktopLyricPositionChange, showDesktopLyric, onLyricLinePlay, showRemoteLyric } from '@/core/desktopLyric'
 import playerState from '@/store/player/state'
@@ -61,4 +61,9 @@ export default async(setting: LX.AppSetting) => {
   global.app_event.on('error', pause)
   global.app_event.on('musicToggled', stop)
   global.app_event.on('lyricUpdated', setLyric)
+  // seek / 进度刷新不派发 play、pause 事件（原生 seekTo 是静默的），
+  // 歌词必须显式订阅这两条链路，否则拖动进度条、点歌词行跳转之后
+  // 当前行永远停在 seek 之前的那一句（用户反馈 2026-10-24）
+  global.app_event.on('setProgress', handleSeek)
+  global.app_event.on('progress', handleProgress)
 }
