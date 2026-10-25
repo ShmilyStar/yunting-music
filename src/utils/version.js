@@ -1,5 +1,5 @@
+import { Linking, Platform } from 'react-native'
 import { httpGet } from '@/utils/request'
-import { author, name } from '../../package.json'
 import { downloadFile, stopDownload, temporaryDirectoryPath } from '@/utils/fs'
 import RNFS from 'react-native-fs'
 import { getSupportedAbis, installApk } from '@/utils/nativeModules/utils'
@@ -13,9 +13,27 @@ const abis = [
   'universal',
 ]
 
+/**
+ * 版本信息源：Gitee 优先，GitHub 兜底。
+ *
+ * 用户 2026-10-25 的最终方案：
+ *   - Gitee 仓库**只保留 publish/version.json**（代码全部清除），
+ *     安装包放在 Gitee 的发行版（Releases）里；
+ *   - 由私密仓库 ShmilyStar/MySync 的 Actions 负责把 GitHub 发布同步过去，
+ *     并删除 Gitee 上的旧版本发行版，只留最新一个。
+ *
+ * 因此 App 侧检测读 Gitee 上那个唯一的 version.json，下载走 Gitee 发行版；
+ * 只有 Gitee 不可用（网络 / 仓库被改私有 / 文件缺失）时才回退到 GitHub，
+ * 避免国内用户上线就先白等一次超时。
+ */
+const REPO_OWNER = 'ShmilyStar'
+const REPO_NAME = 'yunting-music'
+const GITEE_RAW_BASE = `https://gitee.com/${REPO_OWNER}/${REPO_NAME}/raw/main`
+const GITHUB_RAW_BASE = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main`
+
 const address = [
-  // fork 更新通道：单源指向本仓库（见 openspec/changes/fork-update-channel）
-  [`https://raw.githubusercontent.com/${author.name}/${name}/main/publish/version.json`, 'direct'],
+  [`${GITEE_RAW_BASE}/publish/version.json`, 'gitee'],
+  [`${GITHUB_RAW_BASE}/publish/version.json`, 'github'],
 ]
 
 /** 单次请求的硬超时：超时后必须 reject，不能让调用方永远 await 下去 */
@@ -119,7 +137,49 @@ let apkSavePath
  * 注意「自动调起安装器」和「自动安装」是两回事：安装器的最后一步
  * （是否安装 / 授权未知来源）始终由用户在系统界面里手动确认，App 无法代劳。
  */
+/** GitHub Release 里同名资源的下载地址，作为 Gitee 失败时的兜底 */
+const githubApkUrl = (version, abi) =>
+  `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${REPO_NAME}-v${version}-${abi}.apk`
+
+/** Gitee 发行版里同名资源的下载地址（用户 2026-10-25 指定改到 Gitee） */
+const giteeApkUrl = (version, abi) =>
+  `https://gitee.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${REPO_NAME}-v${version}-${abi}.apk`
+
+/**
+ * 下载新版本 APK，**下载完成后自动调起系统安装界面**（用户 2026-10-21 指定）。
+ *
+ * 完整流程：
+ *   启动自动检查 / 点「检查更新」→ 发现有新版本 → 弹窗询问 →
+ *   用户点「是」→ 后台自动下载 → 下载完成直接拉起系统安装器 →
+ *   由用户手动点「安装」。
+ *
+ * 下载源：Gitee 发行版优先，GitHub Release 兜底。两个仓库由 Actions
+ * 自动同步，同一版本两边都有同名的 APK 附件，任一可用即可完成更新。
+ *
+ * 注意「自动调起安装器」和「自动安装」是两回事：安装器的最后一步
+ * （是否安装 / 授权未知来源）始终由用户在系统界面里手动确认，App 无法代劳。
+ */
 export const downloadNewVersion = async(version, onDownload = noop) => {
+  /**
+   * iOS：不在 App 内下载，直接调浏览器去下 IPA（用户 2026-10-25 指定）。
+   *
+   * 原因：iOS 没有「下载完自动装」的通道，装包必须走签名 + 系统授权，
+   * App 内下完也只能躺在沙盒里。交给 Safari 后用户可直接存到「文件」
+   * 或交给签名工具处理，比在 App 里下完后无处可去更符合预期。
+   */
+  if (Platform.OS === 'ios') {
+    const file = `${REPO_NAME}-v${version}-unsigned.ipa`
+    const ipaUrl = `https://gitee.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${file}`
+    const fallback = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${file}`
+    try {
+      await Linking.openURL(ipaUrl)
+    } catch (e) {
+      // Gitee 没传 IPA 时退回 GitHub 的同名附件
+      await Linking.openURL(fallback)
+    }
+    return
+  }
+
   const savePath = temporaryDirectoryPath + '/lx-music-mobile.apk'
 
   if (downloadJobId) stopDownload(downloadJobId)
@@ -130,24 +190,27 @@ export const downloadNewVersion = async(version, onDownload = noop) => {
   } catch (e) { /* 清不掉也不影响后续覆盖写 */ }
 
   const primaryAbi = await getTargetAbi()
-  // 首选设备自己的 ABI；万一该 Release 没传这个 ABI（404），
+  // 首选设备自己的 ABI；万一该发行版没传这个 ABI（404），
   // 再依次退到其它 ABI / universal，避免整条更新链直接失败
-  const candidates = [primaryAbi, ...abis.filter(a => a !== primaryAbi)]
+  const candidateAbis = [primaryAbi, ...abis.filter(a => a !== primaryAbi)]
 
   let lastErr = null
-  for (const abi of candidates) {
-    const url = `https://github.com/${author.name}/${name}/releases/download/v${version}/${name}-v${version}-${abi}.apk`
-    try {
-      await downloadOne(url, savePath, onDownload)
-      apkSavePath = savePath
-      // 下载完直接拉起系统安装器，把「安装」这一步交给用户
-      return updateApp()
-    } catch (err) {
-      lastErr = err
-      console.log('[update] candidate failed:', abi, err && (err.message || err))
+  for (const abi of candidateAbis) {
+    // 同一 ABI 先试 Gitee，再试 GitHub
+    for (const buildUrl of [giteeApkUrl, githubApkUrl]) {
+      const url = buildUrl(version, abi)
       try {
-        if (await RNFS.exists(savePath)) await RNFS.unlink(savePath)
-      } catch (e) { /* ignore */ }
+        await downloadOne(url, savePath, onDownload)
+        apkSavePath = savePath
+        // 下载完直接拉起系统安装器，把「安装」这一步交给用户
+        return updateApp()
+      } catch (err) {
+        lastErr = err
+        console.log('[update] candidate failed:', abi, url, err && (err.message || err))
+        try {
+          if (await RNFS.exists(savePath)) await RNFS.unlink(savePath)
+        } catch (e) { /* ignore */ }
+      }
     }
   }
   throw lastErr ?? new Error('no download candidate')
