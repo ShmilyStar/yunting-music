@@ -1,0 +1,56 @@
+name: Notify MySync
+
+# 新版本发布后，通知私密仓库 ShmilyStar/MySync 去同步 Gitee：
+#   1. Gitee 只保留 publish/version.json，清掉所有代码；
+#   2. 把本版本 APK/IPA 上传到 Gitee 发行版（不传源码包）；
+#   3. 删除 Gitee 上除最新外的旧发行版。
+#
+# 同步逻辑与 Gitee 令牌都在私密仓库 MySync 里；本仓库只需要一个能触发
+# MySync Actions 的令牌，放在 Secret `MYSYNC` 中（不是明文）。
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '要同步的版本号，例如 1.0.5（不含 v）；留空则取当前 Release'
+        required: false
+
+jobs:
+  notify:
+    name: Dispatch to MySync
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          VERSION="${VERSION:-$INPUT_VERSION}"
+          if [ -z "$VERSION" ]; then
+            echo "::error::没有拿到版本号"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "通知 MySync 同步版本：$VERSION"
+
+      - name: repository_dispatch to MySync
+        env:
+          # 只用于触发 MySync 的 Actions，不参与任何代码/安装包读写
+          SYNC_TOKEN: ${{ secrets.MYSYNC }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::缺少 MYSYNC Secret，无法通知同步"
+            exit 1
+          fi
+          echo "::add-mask::$SYNC_TOKEN"
+          curl -sS -X POST \
+            -H "Authorization: token ${SYNC_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "User-Agent: yunting-release-notifier" \
+            "https://api.github.com/repos/ShmilyStar/MySync/dispatches" \
+            -d "$(printf '{"event_type":"yunting-release","client_payload":{"version":"%s"}}' "$VERSION")"
+          echo "已通知 MySync 同步 v${VERSION}"
