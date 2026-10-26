@@ -2,15 +2,16 @@ name: Notify MySync
 
 # 新版本发布后，通知私密仓库 ShmilyStar/MySync 去同步 Gitee：
 #   1. 先把本版本 APK/IPA 全部上传到 Gitee 发行版；
-#   2. 再删掉 Gitee 上除最新外的旧发行版 / 旧 tag；
+#   2. 再删掉 Gitee 上除最新外的旧发行版（只保留最新）；
 #   3. 最后才更新 Gitee 的 publish/version.json。
 #
-# 同步逻辑与 Gitee 令牌都在私密仓库 MySync 里；本仓库不持有任何令牌。
+# 同步逻辑和写 Gitee 的令牌都在私密仓库 MySync 里。
+# 本仓库只需要一个 Secret：`MYSYNC`（能访问 MySync 的 GitHub PAT，仅用于发通知）。
 #
 # 为什么由发布流程**主动**通知，而不是监听 release 事件：
-#   GitHub 有过一条规则——用 Actions 自带的 GITHUB_TOKEN 创建的 Release
-#   不会触发 release 事件类的工作流（防递归）。所以 on: release 这条在本仓库
-#   永远不会被触发，只能由 release.yml 在 Release 完成后面板上调用本工作流。
+#   GitHub 有一条规则——用 Actions 自带的 GITHUB_TOKEN 创建的 Release
+#   不会触发 release 事件类的工作流（防递归）。所以 `on: release` 在本仓库
+#   永远不会被触发，只能由 release.yml 在 Release 完成后直接调用本工作流。
 on:
   workflow_call:
     inputs:
@@ -50,38 +51,30 @@ jobs:
       - name: Dispatch to MySync
         env:
           VERSION: ${{ steps.ver.outputs.version }}
-          # 可选：若本仓库配置了 MYSYNC Secret（一个能访问 MySync 的 PAT），就用它。
-          # 现在是**空的**（已删除），走匿名调用，实测可用（HTTP 204）。
+          # **必需**：一个能访问私密仓库 MySync 的 GitHub PAT。
+          #
+          # 实测过三种方式往 MySync 发 dispatch：
+          #   - 匿名调用        → 401 Requires authentication
+          #   - 本仓库 GITHUB_TOKEN → 404（它只能看到本仓库，看不到私密仓库）
+          #   - 具备 repo 权限的 PAT → 204 ✅
+          # 所以这个 Secret 不能省，删掉整个发布流程就无法通知 Gitee。
           SYNC_TOKEN: ${{ secrets.MYSYNC }}
         run: |
-          # 重试几次：dispatch 偶发 5xx 时不要让发布流程留下「Gitee 没同步」的尾巴。
-          echo "将通知 MySync 同步 v${VERSION}"
-          if [ -n "${SYNC_TOKEN:-}" ]; then
-            echo "使用 MYSYNC Secret 鉴权"
-            echo "::add-mask::$SYNC_TOKEN"
-            AUTH_HEADER="Authorization: token ${SYNC_TOKEN}"
-          else
-            echo "未配置 MYSYNC Secret，使用匿名 dispatch（公开仓库对公开接口允许匿名调用）"
-            AUTH_HEADER=""
+          if [ -z "${SYNC_TOKEN:-}" ]; then
+            echo "::error::缺少 MYSYNC Secret（需要能访问 ShmilyStar/MySync 的 PAT，否则 Gitee 收不到同步通知）"
+            exit 1
           fi
+          echo "::add-mask::$SYNC_TOKEN"
 
+          # 重试几次：dispatch 偶发 5xx 时不要让发布流程留下「Gitee 没同步」的尾巴。
           for i in 1 2 3 4 5; do
-            if [ -n "$AUTH_HEADER" ]; then
-              CODE=$(curl -s -o /tmp/resp.txt -w '%{http_code}' -X POST \
-                -H "$AUTH_HEADER" \
-                -H "User-Agent: notify-mysync" \
-                -H "Accept: application/vnd.github+json" \
-                -H "Content-Type: application/json" \
-                --data "{\"event_type\":\"yunting-release\",\"client_payload\":{\"version\":\"${VERSION}\"}}" \
-                https://api.github.com/repos/ShmilyStar/MySync/dispatches)
-            else
-              CODE=$(curl -s -o /tmp/resp.txt -w '%{http_code}' -X POST \
-                -H "User-Agent: notify-mysync" \
-                -H "Accept: application/vnd.github+json" \
-                -H "Content-Type: application/json" \
-                --data "{\"event_type\":\"yunting-release\",\"client_payload\":{\"version\":\"${VERSION}\"}}" \
-                https://api.github.com/repos/ShmilyStar/MySync/dispatches)
-            fi
+            CODE=$(curl -s -o /tmp/resp.txt -w '%{http_code}' -X POST \
+              -H "Authorization: token ${SYNC_TOKEN}" \
+              -H "User-Agent: notify-mysync" \
+              -H "Accept: application/vnd.github+json" \
+              -H "Content-Type: application/json" \
+              --data "{\"event_type\":\"yunting-release\",\"client_payload\":{\"version\":\"${VERSION}\"}}" \
+              https://api.github.com/repos/ShmilyStar/MySync/dispatches)
             echo "第 ${i} 次 dispatch -> HTTP ${CODE}"
             if [ "$CODE" = "204" ]; then
               echo "✔ 已通知 MySync 同步 v${VERSION}"
