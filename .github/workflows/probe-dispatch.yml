@@ -1,0 +1,18 @@
+﻿name: probe-dispatch
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: try GITHUB_TOKEN cross-repo dispatch
+        run: |
+          CODE=$(curl -s -o /tmp/r.txt -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "User-Agent: probe" \
+            -H "Content-Type: application/json" \
+            --data '{"event_type":"yunting-release","client_payload":{"version":"1.0.6"}}' \
+            https://api.github.com/repos/ShmilyStar/MySync/dispatches)
+          echo "GITHUB_TOKEN cross-repo dispatch -> HTTP $CODE"
+          cat /tmp/r.txt || true
