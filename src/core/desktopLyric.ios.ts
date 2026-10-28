@@ -5,6 +5,7 @@
  */
 interface LyricLine { text: string, extendedLyrics: string[] }
 interface Position { x: number, y: number }
+interface DesktopLyricAction { action: string, value?: string }
 
 const noop = async(..._args: unknown[]) => {}
 
@@ -30,5 +31,6 @@ export const openDesktopLyricOverlayPermissionActivity = noop
 
 export const onDesktopLyricPositionChange = (_handler: (position: Position) => void): (() => void) => () => {}
 export const onLyricLinePlay = (_handler: (line: LyricLine) => void): (() => void) => () => {}
+export const onDesktopLyricAction = (_handler: (event: DesktopLyricAction) => void): (() => void) => () => {}
 
 export const showRemoteLyric = async(_isSend: boolean) => {}

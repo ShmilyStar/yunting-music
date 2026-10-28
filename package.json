@@ -1,7 +1,7 @@
 {
   "name": "yunting-music",
-  "version": "1.0.6",
-  "versionCode": 4,
+  "version": "1.0.7",
+  "versionCode": 5,
   "private": true,
   "scripts": {
     "test": "vitest run",

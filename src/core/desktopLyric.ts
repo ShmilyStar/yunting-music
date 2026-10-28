@@ -27,6 +27,7 @@ import { tranditionalize } from '@/utils/simplify-chinese-main'
 import { getPosition } from '@/plugins/player'
 export {
   onLyricLinePlay,
+  onAction as onDesktopLyricAction,
 } from '@/utils/nativeModules/lyricDesktop'
 
 export const showDesktopLyric = async() => {

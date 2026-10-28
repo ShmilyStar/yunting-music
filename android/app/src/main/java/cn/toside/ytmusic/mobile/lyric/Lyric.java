@@ -116,7 +116,8 @@ public class Lyric extends LyricPlayer {
     isScreenOff = false;
     if (isDisableAutoPause()) return;
     if (lyricView == null) lyricView = new LyricView(reactAppContext, lyricEvent);
-    lyricView.runOnUiThread(() -> {
+    // 悬浮窗的视图挂在 RN 原生模块线程上，屏幕亮起回调在主线程，必须 post 回视图线程
+    lyricView.postOnViewThread(() -> {
       handleGetCurrentLyric(lastLine);
       setTempPause(false);
     });
@@ -128,9 +129,9 @@ public class Lyric extends LyricPlayer {
     this.pause();
   }
 
-  private void setCurrentLyric(String lyric, ArrayList<String> extendedLyrics) {
+  private void setCurrentLyric(String lyric, ArrayList<String> extendedLyrics, ArrayList<String> followingLyrics) {
     if (isShowLyricView && !isScreenOff && lyricView != null) {
-      lyricView.setLyric(lyric, extendedLyrics);
+      lyricView.setLyric(lyric, extendedLyrics, followingLyrics);
     }
     if (isSendLyricTextEvent) {
       WritableMap params = Arguments.createMap();
@@ -144,11 +145,24 @@ public class Lyric extends LyricPlayer {
     if (lineNum >= 0 && lineNum < lines.size()) {
       HashMap line = (HashMap) lines.get(lineNum);
       if (line != null) {
-        setCurrentLyric((String) line.get("text"), (ArrayList<String>) line.get("extendedLyrics"));
+        setCurrentLyric((String) line.get("text"), (ArrayList<String>) line.get("extendedLyrics"), getFollowingLyrics(lineNum));
         return;
       }
     }
-    setCurrentLyric("", new ArrayList<>(0));
+    setCurrentLyric("", new ArrayList<>(0), new ArrayList<>(0));
+  }
+
+  /** 当前行之后的歌词，供桌面歌词按「已播放 / 未播放」两种颜色渲染 */
+  private ArrayList<String> getFollowingLyrics(int lineNum) {
+    ArrayList<String> following = new ArrayList<>();
+    if (lineNum < 0) return following;
+    for (int i = lineNum + 1; i < lines.size() && following.size() < 5; i++) {
+      HashMap line = (HashMap) lines.get(i);
+      if (line == null) continue;
+      String text = (String) line.get("text");
+      if (text != null && !text.isEmpty()) following.add(text);
+    }
+    return following;
   }
 
   public void setSendLyricTextEvent(boolean isSend) {
@@ -167,6 +181,7 @@ public class Lyric extends LyricPlayer {
     if (lyricEvent == null) lyricEvent = new LyricEvent(reactAppContext);
     isShowLyricView = true;
     if (lyricView == null) lyricView = new LyricView(reactAppContext, lyricEvent);
+    lyricView.setOnCloseListener(this::hideDesktopLyric);
     try {
       lyricView.showLyricView(options);
     } catch (Exception e) {
@@ -222,7 +237,21 @@ public class Lyric extends LyricPlayer {
   public void pauseLyric() {
     pause();
     if (!isRunPlayer) return;
-    handleGetCurrentLyric(-1);
+    // 暂停时保留当前这一行（和网易云一致：歌词停在原处，不消失）。
+    // 只有歌词还没开始播放（lastLine 仍是 -1）时才不显示内容。
+    if (lastLine >= 0) handleGetCurrentLyric(lastLine);
+  }
+
+  @Override
+  public void play(int curTime) {
+    super.play(curTime);
+    if (lyricView != null) lyricView.setPlaying(true);
+  }
+
+  @Override
+  public void pause() {
+    super.pause();
+    if (lyricView != null) lyricView.setPlaying(false);
   }
 
   public void lockLyric() {

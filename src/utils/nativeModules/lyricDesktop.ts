@@ -188,3 +188,25 @@ export const onLyricLinePlay = (handler: (lineInfo: { text: string, extendedLyri
     eventListener.remove()
   }
 }
+
+/** 桌面歌词面板上的操作，由原生悬浮窗发起 */
+export interface DesktopLyricActionEvent {
+  action: 'prev' | 'next' | 'toggle' | 'close' | 'lock' | 'theme' | 'fontSize' | 'maxLineNum' | 'width'
+  value?: string
+  /** 换主题色时一并带回对应的描边色（黑色歌词要配白色描边） */
+  shadow?: string
+}
+
+/** 订阅桌面歌词面板操作；不支持的平台返回空的取消函数 */
+export const onAction = (handler: (event: DesktopLyricActionEvent) => void): () => void => {
+  if (!isSupported) return () => {}
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+  const eventEmitter = new NativeEventEmitter(LyricModule)
+  const eventListener = eventEmitter.addListener('desktop-lyric-action', event => {
+    handler(event as DesktopLyricActionEvent)
+  })
+
+  return () => {
+    eventListener.remove()
+  }
+}

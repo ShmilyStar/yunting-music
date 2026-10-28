@@ -1,6 +1,7 @@
 import { init as initLyricPlayer, toggleTranslation, toggleRoma, play, pause, stop, setLyric, setPlaybackRate, handleSeek, handleProgress } from '@/core/lyric'
 import { updateSetting } from '@/core/common'
-import { onDesktopLyricPositionChange, showDesktopLyric, onLyricLinePlay, showRemoteLyric } from '@/core/desktopLyric'
+import { onDesktopLyricPositionChange, showDesktopLyric, onLyricLinePlay, showRemoteLyric, onDesktopLyricAction, hideDesktopLyric, setDesktopLyricMaxLineNum } from '@/core/desktopLyric'
+import { playNext, playPrev, togglePlay } from '@/core/player/player'
 import playerState from '@/store/player/state'
 import { updateNowPlayingTitles } from '@/plugins/player/utils'
 import { setLastLyric } from '@/core/player/playInfo'
@@ -31,7 +32,8 @@ export default async(setting: LX.AppSetting) => {
   ])
 
   if (setting['desktopLyric.enable']) {
-    showDesktopLyric().catch(() => {
+    showDesktopLyric().catch((err) => {
+      console.warn('showDesktopLyric failed', err)
       updateSetting({ 'desktopLyric.enable': false })
     })
   }
@@ -51,6 +53,55 @@ export default async(setting: LX.AppSetting) => {
       void updateRemoteLyric()
     } else {
       void updateRemoteLyric(text)
+    }
+  })
+  // 桌面歌词悬浮窗上的控制按钮：原生只负责画和发事件，播放动作与设置落库在这里
+  onDesktopLyricAction(({ action, value, shadow }) => {
+    switch (action) {
+      case 'prev':
+        void playPrev()
+        break
+      case 'next':
+        void playNext()
+        break
+      case 'toggle':
+        togglePlay()
+        break
+      case 'close':
+        void hideDesktopLyric()
+        updateSetting({ 'desktopLyric.enable': false })
+        break
+      case 'lock':
+        updateSetting({ 'desktopLyric.isLock': true })
+        break
+      case 'theme':
+        if (value) {
+          updateSetting({
+            'desktopLyric.style.lyricPlayedColor': value,
+            ...(shadow ? { 'desktopLyric.style.lyricShadowColor': shadow } : {}),
+          })
+        }
+        break
+      case 'fontSize': {
+        const size = Number(value)
+        if (Number.isFinite(size)) updateSetting({ 'desktopLyric.style.fontSize': size })
+        break
+      }
+      case 'maxLineNum': {
+        const lineNum = Number(value)
+        if (Number.isFinite(lineNum)) {
+          const next = Math.max(1, Math.min(8, Math.round(lineNum)))
+          void setDesktopLyricMaxLineNum(next).then(() => {
+            updateSetting({ 'desktopLyric.maxLineNum': next })
+          })
+        }
+        break
+      }
+      case 'width': {
+        const width = Number(value)
+        if (Number.isFinite(width)) updateSetting({ 'desktopLyric.width': Math.max(10, Math.min(100, Math.round(width))) })
+        break
+      }
     }
   })
 

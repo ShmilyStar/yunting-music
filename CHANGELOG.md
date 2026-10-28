@@ -6,6 +6,37 @@ Project versioning adheres to [Semantic Versioning](http://semver.org/).
 Commit convention is based on [Conventional Commits](http://conventionalcommits.org).
 Change log format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+## [1.0.7](https://github.com/ShmilyStar/yunting-music/compare/v1.9.1...v1.0.7) - 2026-10-28
+
+本版本为桌面歌词面板重做版：控制面板整套图标按 App 的设计语言重新绘制，并修好了一批面板交互问题。
+
+### 新增
+
+- 桌面歌词控制面板：点歌词展开后可直接切换主题色、调字号、调行数、拖动窗口宽度
+- 单行歌词模式：长句一行放不下时自动缩小字号到正好放下，放得下保持原字号
+
+### 调整
+
+- 面板图标整套重做：统一线性细描边（笔画约字框的 1/14、圆头圆角），尺寸按设置行间距自适应，平板 / 手机 / 不同 dpi 下比例一致
+- 左上角音符图标与右上角关闭叉对齐并贴到面板顶角，两者共用同一笔画粗细
+- 播放键改为 App 主色实心圆 + 白色图标，与 App 内播放页一致
+- 面板宽度滑条、色点、字号图标统一使用 App 主色
+
+### 修复
+
+- 面板「行数 −」点了没反应：行数调小时窗口高度收不回去（上一帧排版高度被当成下限）
+- 面板图标在手机上偏小：缩放系数误用了平板断点，所有竖屏设备都被缩到 0.58 倍
+- 面板图标锯齿、发虚：删掉每帧重建的 3 倍离屏位图（约 30MB/帧），改为直接在主画布绘制
+- 单行歌词长句溢出窗口；窗口拖窄后字号不跟着重算
+- 单行模式下「行数 ±」无提示：现在会置灰
+- 面板开合时歌词位置跳动：面板改为不移动歌词、放不下时整块翻到歌词上方
+- 屏幕亮起恢复歌词时偶发不同步：回调改回视图线程执行
+
+### 注意
+
+- Android 安装包按 ABI 提供，绝大多数设备选 `arm64-v8a`
+- 从更早版本升级可直接覆盖安装（签名一致）
+
 ## [1.9.1.2](https://github.com/wtfdelphia/lx-music-mobile/compare/v1.9.1.1...v1.9.1.2) - 2026-10-12
 
 本版本为 iOS 新增歌曲下载功能，Android 行为无变化。
