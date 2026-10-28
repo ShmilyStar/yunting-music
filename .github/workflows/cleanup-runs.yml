@@ -31,7 +31,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          KEEP=3
+          # 本次清理运行本身也会留在列表里，所以这里只保留 2 条别的记录：
+          # 2 + 本次 = 仓库里始终只有 3 条运行记录。
+          KEEP=2
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions"
           H=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "User-Agent: cleanup")
 
@@ -46,7 +48,7 @@ jobs:
           fi
 
           total=$(echo "$ids" | wc -l | tr -d ' ')
-          echo "已完成记录 ${total} 条，保留最新 ${KEEP} 条"
+          echo "已完成记录 ${total} 条，保留最新 ${KEEP} 条（加本次共 ${KEEP}+1 条）"
 
           n=0
           deleted=0
