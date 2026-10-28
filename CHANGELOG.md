@@ -6,6 +6,23 @@ Project versioning adheres to [Semantic Versioning](http://semver.org/).
 Commit convention is based on [Conventional Commits](http://conventionalcommits.org).
 Change log format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+## [1.0.8](https://github.com/ShmilyStar/yunting-music/compare/v1.0.7...v1.0.8) - 2026-10-28
+
+本版本修复「更新到 1.0.7 后仍然反复提示有新版本」的问题。
+
+### 修复
+
+- 安装新版本后再次打开仍提示更新：App 判断当前版本时读的是打进 JS 包的 `package.json`，
+  而改版本号不会触发 JS 包重新打包，导致 1.0.7 的安装包里版本号仍是 1.0.6，
+  于是永远比线上版本旧、每次都弹更新框
+- 现在改为读取安装包自身的版本号（原生 `BuildConfig.VERSION_NAME`），并在构建时把
+  `package.json` 纳入打包输入，版本一变就重打 JS 包
+
+### 注意
+
+- Android 安装包按 ABI 提供，绝大多数设备选 `arm64-v8a`
+- 从 1.0.7 可直接覆盖安装；装完再打开不会再提示更新
+
 ## [1.0.7](https://github.com/ShmilyStar/yunting-music/compare/v1.9.1...v1.0.7) - 2026-10-28
 
 本版本为桌面歌词面板重做版：控制面板整套图标按 App 的设计语言重新绘制，并修好了一批面板交互问题。

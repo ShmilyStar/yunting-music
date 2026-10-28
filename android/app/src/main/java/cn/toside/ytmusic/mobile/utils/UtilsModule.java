@@ -115,6 +115,19 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     }
   }
 
+  /**
+   * 当前安装包的 versionName。
+   *
+   * App 里判断「有没有新版本」要拿它和线上 version.json 比。原实现读的是
+   * 打进 JS bundle 的 package.json：bundle 只在 JS 源码变化时才重打，
+   * 改 package.json 不触发重打，于是发出去的新包里版本号还是旧的，
+   * 装完照样提示有新版。这里以 APK 自身的 BuildConfig 为准，永远和安装包一致。
+   */
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public String getVersionName() {
+    return cn.toside.ytmusic.mobile.BuildConfig.VERSION_NAME;
+  }
+
   @ReactMethod
   public void getSupportedAbis(Promise promise) {
     // https://github.com/react-native-device-info/react-native-device-info/blob/ff8f672cb08fa39a887567d6e23e2f08778e8340/android/src/main/java/com/learnium/RNDeviceInfo/RNDeviceModule.java#L877

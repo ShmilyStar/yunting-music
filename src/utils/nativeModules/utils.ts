@@ -9,6 +9,15 @@ export const backHome = () => UtilsModule.backHome?.()
 
 export const getSupportedAbis = UtilsModule.getSupportedAbis
 
+/** 当前安装包的 versionName（原生读取，和 APK 永远一致）；取不到时返回 undefined */
+export const getVersionName = (): string | undefined => {
+  try {
+    return (UtilsModule.getVersionName as (() => string) | undefined)?.()
+  } catch (e) {
+    return undefined
+  }
+}
+
 export const installApk = (filePath: string, fileProviderAuthority: string) => UtilsModule.installApk(filePath, fileProviderAuthority)
 
 

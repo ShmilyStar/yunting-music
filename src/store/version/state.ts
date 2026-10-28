@@ -1,4 +1,14 @@
-import { version } from '../../../package.json'
+import { version as pkgVersion } from '../../../package.json'
+import { getVersionName } from '@/utils/nativeModules/utils'
+
+/**
+ * 本机版本号。
+ *
+ * 优先用原生返回的 versionName（= APK 真实版本）；只有拿不到时才退回
+ * 打包进 bundle 的 package.json。原因见 UtilsModule.getVersionName 的注释：
+ * 改 package.json 不会触发 JS bundle 重新打包，旧 bundle 会让「装完新版还提示更新」。
+ */
+const version = getVersionName() ?? pkgVersion
 
 export interface ProgressInfo {
   total: number
