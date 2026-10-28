@@ -1,0 +1,65 @@
+name: Cleanup old runs
+
+# 只保留最近 3 次运行记录，其余自动删除（用户 2026-10-28 要求）。
+#
+# 说明：
+#   - GitHub 默认永久保留运行记录，这里按「全仓库所有工作流」统一计数，
+#     这样 Actions 首页「All workflows」永远只看到 3 条；
+#   - 只删「已完成」的，正在跑的不动；本次运行本身也不会被删；
+#   - 删除运行记录不可恢复（日志一起没）。需要保留某次日志就先下载。
+on:
+  schedule:
+    # UTC 20:00 = 北京时间 04:00，避开白天的发布时段
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: cleanup-old-runs
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Keep latest 3 runs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete runs beyond the newest 3
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          KEEP=3
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions"
+          H=(-H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "User-Agent: cleanup")
+
+          # 按创建时间倒序取一批（API 默认就是倒序），只留已完成的
+          ids=$(curl -s "${H[@]}" "${API}/runs?per_page=100" \
+                | jq -r --arg cur "${GITHUB_RUN_ID}" \
+                    '.workflow_runs[]? | select(.status == "completed") | select((.id|tostring) != $cur) | .id')
+
+          if [ -z "$ids" ]; then
+            echo "没有可清理的运行记录"
+            exit 0
+          fi
+
+          total=$(echo "$ids" | wc -l | tr -d ' ')
+          echo "已完成记录 ${total} 条，保留最新 ${KEEP} 条"
+
+          n=0
+          deleted=0
+          for id in $ids; do
+            n=$((n + 1))
+            if [ "$n" -le "$KEEP" ]; then continue; fi
+            code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "${H[@]}" "${API}/runs/${id}")
+            if [ "$code" = "204" ]; then
+              deleted=$((deleted + 1))
+            else
+              echo "删除 ${id} 失败：HTTP ${code}"
+            fi
+            sleep 1
+          done
+
+          echo "本次删除 ${deleted} 条，剩余约 $((total - deleted)) 条"
