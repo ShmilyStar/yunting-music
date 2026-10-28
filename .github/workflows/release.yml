@@ -356,16 +356,15 @@ jobs:
   # 不会触发其它工作流（GitHub 的防递归机制），所以必须在这里直接调。
   #
   # Gitee 上的顺序由 MySync 保证：先传齐安装包 → 再删旧版本 → 最后改 version.json。
+  # 注意：notify-mysync.yml 是 workflow_call 工作流，不是 action。
+  # 早先写成在 steps 里 `uses: ./.github/workflows/notify-mysync.yml`（本地 action 语法），
+  # GitHub 会去找 action.yml，必然报 Can't find 'action.yml' ...，导致每次发版同步 Gitee 都失败。
+  # 可复用工作流必须在 job 级别 uses，并用 secrets: inherit 把 MYSYNC 传进去。
   NotifyGitee:
     name: Sync to Gitee
-    runs-on: ubuntu-latest
     needs: [CheckVersion, Release]
     if: needs.Release.result == 'success'
-    steps:
-      - name: Check out git repository
-        uses: actions/checkout@v7
-
-      - name: Trigger MySync
-        uses: ./.github/workflows/notify-mysync.yml
-        with:
-          version: ${{ needs.CheckVersion.outputs.version }}
+    uses: ./.github/workflows/notify-mysync.yml
+    with:
+      version: ${{ needs.CheckVersion.outputs.version }}
+    secrets: inherit
