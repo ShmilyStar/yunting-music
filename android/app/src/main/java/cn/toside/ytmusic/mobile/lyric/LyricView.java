@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.SpannableString;
+import android.text.StaticLayout;
 import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.style.ForegroundColorSpan;
@@ -206,19 +207,34 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 上下留白给行高，左右留白避开面板上的图标；视图本身占满窗口宽度，文字才会真正居中
     textView.setPadding(inset, verticalPadding, inset, verticalPadding);
 
-    // 行数只是上限：歌词还没铺满时按实际行数收高，避免空出一大片
-    int lineCount = isSingleLine ? 1 : Math.max(1, maxLineNum);
-    int actualLines = Math.max(1, countLyricLines());
-    int usedLines = Math.min(lineCount, actualLines);
-
-    // 先按字高估算，再用 TextView 的真实排版高度兜底：
-    // 换行与行距都由 TextView 自己算，只按字高估算会在行数多时把最后一行底部裁掉。
-    // 但排版高度是「上一帧」的：把行数调小时旧布局比新上限还多，此时不能拿它兜底，
-    // 否则窗口永远收不回去（面板上的「行数 −」看起来就像没反应）。
-    int fm = paint.getFontMetricsInt(null);
-    int height = Math.round(fm * 1.18f) * usedLines + verticalPadding * 2;
-    int contentHeight = textView.getContentHeight();
-    if (contentHeight > height && textView.getLineCount() <= usedLines) height = contentHeight;
+    // 高度直接按「当前文本 + 当前宽度」真排一遍来量。
+    //
+    // 早先是「逻辑行数 × 行高」估算，再用 TextView 上一帧的排版高度兜底；两个问题：
+    //   1. 英文歌词会折行，一句占几个视觉行和 maxLineNum（逻辑行）无关，
+    //      按逻辑行估必然少算，折出来的第三行只露个头顶就被裁掉；
+    //   2. 兜底用的是上一帧的布局，行数调小时又反过来把窗口撑住收不回去。
+    // StaticLayout 用的是同一份 paint / 宽度 / 行距，结果和 TextView 实际排版一致，
+    // 也不依赖布局时机。
+    int availableWidth = layoutParams == null ? 0 : layoutParams.width - inset * 2;
+    int height = 0;
+    if (availableWidth > 0) {
+      CharSequence text = buildLyricText();
+      if (text.length() > 0) {
+        StaticLayout layout = StaticLayout.Builder
+          .obtain(text, 0, text.length(), paint, availableWidth)
+          .setIncludePad(false)
+          .setLineSpacing(0f, 1f)
+          .build();
+        height = layout.getHeight();
+      }
+    }
+    if (height <= 0) {
+      // 还没有文本时按行数估个占位高度
+      int lines = isSingleLine ? 1 : Math.max(1, Math.min(maxLineNum, Math.max(1, countLyricLines())));
+      int fm = paint.getFontMetricsInt(null);
+      height = Math.round(fm * 1.18f) * lines;
+    }
+    height += verticalPadding * 2;
     if (height > maxHeight - 100) height = maxHeight - 100;
     if (height < 1) height = 1;
     lyricHeight = height;
