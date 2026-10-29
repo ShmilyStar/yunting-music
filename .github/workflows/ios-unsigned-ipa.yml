@@ -43,7 +43,10 @@ jobs:
 
       - name: 读取版本号
         id: ver
-        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=${VERSION##*.}" >> "$GITHUB_OUTPUT"
 
       - name: 安装 JS 依赖
         run: npm ci --no-audit --no-fund
@@ -73,7 +76,20 @@ jobs:
           -derivedDataPath build
           CODE_SIGNING_ALLOWED=NO
           COMPILER_INDEX_STORE_ENABLE=NO
+          MARKETING_VERSION=${{ steps.ver.outputs.version }}
+          CURRENT_PROJECT_VERSION=${{ steps.ver.outputs.build }}
           build
+
+      - name: 校验 IPA 版本号
+        working-directory: ios/build/Build/Products/Release-iphoneos
+        run: |
+          SHORT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" LxMusicMobile.app/Info.plist)
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" LxMusicMobile.app/Info.plist)
+          echo "IPA version: $SHORT ($BUILD), package.json: ${{ steps.ver.outputs.version }}"
+          if [ "$SHORT" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "::error::IPA 版本号与 package.json 不一致（$SHORT != ${{ steps.ver.outputs.version }}）"
+            exit 1
+          fi
 
       - name: 打包 IPA
         run: |
