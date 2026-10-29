@@ -160,6 +160,15 @@ jobs:
       - name: 构建 lxcore staticlib（iOS）
         run: bash rust/build-ios-libs.sh
 
+      # IPA 的 CFBundleShortVersionString / CFBundleVersion 取的是这里传下去的构建参数。
+      # 早先只在 project.pbxproj 里写死（1.0.6），升级版本号时忘了改，签名工具里就显示旧版本。
+      # 现在一律由 package.json 决定，pbxproj 里的值只是本地直接构建时的兜底。
+      - name: Get package version
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+          echo "BUILD_NUMBER=${PACKAGE_VERSION##*.}" >> $GITHUB_ENV
+
       - name: unsigned 构建（设备）
         working-directory: ios
         run: >
@@ -171,12 +180,21 @@ jobs:
           -derivedDataPath build
           CODE_SIGNING_ALLOWED=NO
           COMPILER_INDEX_STORE_ENABLE=NO
+          MARKETING_VERSION="$PACKAGE_VERSION"
+          CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
           build
 
-      - name: Get package version
+      - name: 校验 IPA 版本号
+        working-directory: ios/build/Build/Products/Release-iphoneos
         run: |
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
-          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+          PLIST="LxMusicMobile.app/Info.plist"
+          SHORT=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST")
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$PLIST")
+          echo "IPA version: $SHORT ($BUILD), package.json: $PACKAGE_VERSION"
+          if [ "$SHORT" != "$PACKAGE_VERSION" ]; then
+            echo "::error::IPA 版本号与 package.json 不一致（$SHORT != $PACKAGE_VERSION）"
+            exit 1
+          fi
 
       - name: 打包 IPA
         working-directory: ios/build/Build/Products/Release-iphoneos
