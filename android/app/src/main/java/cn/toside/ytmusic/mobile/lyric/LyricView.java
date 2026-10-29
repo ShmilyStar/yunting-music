@@ -252,22 +252,6 @@ public class LyricView extends Activity implements View.OnTouchListener {
     lyricHeight = used;
   }
 
-  /** 当前歌词实际会显示的行数（原句 + 翻译 / 下一句），用于按内容收高歌词区 */
-  private int countLyricLines() {
-    int count = currentLyric.isEmpty() ? 0 : 1;
-    if (isSingleLine) return Math.max(1, count);
-    if (!currentExtendedLyrics.isEmpty()) {
-      for (String line : currentExtendedLyrics) {
-        if (line != null && !line.isEmpty()) count++;
-      }
-    } else {
-      for (String line : currentFollowingLyrics) {
-        if (line != null && !line.isEmpty()) count++;
-      }
-    }
-    return Math.max(1, Math.min(Math.max(1, maxLineNum), count));
-  }
-
   private void clampPosition() {
     if (layoutParams == null) return;
     int maxX = maxWidth - layoutParams.width;
