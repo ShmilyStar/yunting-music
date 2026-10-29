@@ -128,6 +128,38 @@ public class UtilsModule extends ReactContextBaseJavaModule {
     return cn.toside.ytmusic.mobile.BuildConfig.VERSION_NAME;
   }
 
+  /**
+   * 读一个 APK 文件自身的 versionName（不安装，只解析）。
+   *
+   * 更新流程里用来校验「刚下载的安装包确实是目标版本」：以前下载完直接交给安装器，
+   * 万一拿到的是旧包（缓存 / CDN 回源 / 下载被替换），用户看到的就是「安装后版本没变」。
+   * 解析失败返回空串，由调用方按失败处理。
+   */
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public String getApkVersionName(String filePath) {
+    try {
+      android.content.pm.PackageInfo info = getReactApplicationContext().getPackageManager()
+        .getPackageArchiveInfo(filePath, 0);
+      return info == null || info.versionName == null ? "" : info.versionName;
+    } catch (Exception e) {
+      Log.e("Utils", "getApkVersionName failed: " + e.getMessage());
+      return "";
+    }
+  }
+
+  /** 读一个 APK 文件自身的 versionCode（不安装，只解析）；失败返回 0 */
+  @ReactMethod(isBlockingSynchronousMethod = true)
+  public double getApkVersionCode(String filePath) {
+    try {
+      android.content.pm.PackageInfo info = getReactApplicationContext().getPackageManager()
+        .getPackageArchiveInfo(filePath, 0);
+      return info == null ? 0 : info.versionCode;
+    } catch (Exception e) {
+      Log.e("Utils", "getApkVersionCode failed: " + e.getMessage());
+      return 0;
+    }
+  }
+
   @ReactMethod
   public void getSupportedAbis(Promise promise) {
     // https://github.com/react-native-device-info/react-native-device-info/blob/ff8f672cb08fa39a887567d6e23e2f08778e8340/android/src/main/java/com/learnium/RNDeviceInfo/RNDeviceModule.java#L877

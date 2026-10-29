@@ -2,7 +2,7 @@ import { Linking, Platform } from 'react-native'
 import { httpGet } from '@/utils/request'
 import { downloadFile, stopDownload, temporaryDirectoryPath } from '@/utils/fs'
 import RNFS from 'react-native-fs'
-import { getSupportedAbis, installApk } from '@/utils/nativeModules/utils'
+import { getApkVersionName, getSupportedAbis, installApk } from '@/utils/nativeModules/utils'
 import { APP_PROVIDER_NAME } from '@/config/constant'
 
 const abis = [
@@ -98,7 +98,9 @@ const getDirectInfo = (url) => {
 
 export const getVersionInfo = async(index = 0) => {
   const [url] = address[index]
-  const promise = getDirectInfo(url)
+  // 带时间戳绕开 CDN / 本地缓存：发布后线上 version.json 更新，
+  // 命中旧缓存时 App 会按旧版本号去比对，出现「提示更新但装完还是旧版」这类怪现象
+  const promise = getDirectInfo(`${url}?t=${Date.now()}`)
 
   return promise.catch(async(err) => {
     index++
@@ -180,14 +182,10 @@ export const downloadNewVersion = async(version, onDownload = noop) => {
     return
   }
 
-  const savePath = temporaryDirectoryPath + '/lx-music-mobile.apk'
-
   if (downloadJobId) stopDownload(downloadJobId)
 
-  // 上一次残留的半截文件会让「下载成功」的判定失真，先清掉
-  try {
-    if (await RNFS.exists(savePath)) await RNFS.unlink(savePath)
-  } catch (e) { /* 清不掉也不影响后续覆盖写 */ }
+  // 文件名带上版本号和 ABI：任何一个候选失败都不会把上一次的包当成这次的结果
+  const makeSavePath = (abi) => `${temporaryDirectoryPath}/lx-music-mobile-${version}-${abi}.apk`
 
   const primaryAbi = await getTargetAbi()
   // 首选设备自己的 ABI；万一该发行版没传这个 ABI（404），
@@ -196,11 +194,25 @@ export const downloadNewVersion = async(version, onDownload = noop) => {
 
   let lastErr = null
   for (const abi of candidateAbis) {
+    const savePath = makeSavePath(abi)
     // 同一 ABI 先试 Gitee，再试 GitHub
     for (const buildUrl of [giteeApkUrl, githubApkUrl]) {
       const url = buildUrl(version, abi)
       try {
+        // 先清掉同名残留，避免把上一次的包当成本次下载结果
+        try {
+          if (await RNFS.exists(savePath)) await RNFS.unlink(savePath)
+        } catch (e) { /* 清不掉就交给下载覆盖 */ }
+        console.log('[update] downloading:', url)
         await downloadOne(url, savePath, onDownload)
+        // 关键校验：解析刚下载的 APK 自身版本，必须等于目标版本。
+        // 不校验的话，拿到旧包（缓存 / CDN 回源 / 下载被替换）会直接交给安装器，
+        // 用户看到的就是「下载安装完，版本没变」。
+        const apkVersion = getApkVersionName(savePath)
+        console.log('[update] downloaded apk version:', apkVersion, 'expected:', version)
+        if (apkVersion !== version) {
+          throw new Error(`apk version mismatch: ${apkVersion || 'unknown'} != ${version}`)
+        }
         apkSavePath = savePath
         // 下载完直接拉起系统安装器，把「安装」这一步交给用户
         return updateApp()

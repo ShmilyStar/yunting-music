@@ -87,7 +87,8 @@ const getDirectInfo = (url) => {
 
 export const getVersionInfo = async(index = 0) => {
   const [url] = address[index]
-  const promise = getDirectInfo(url)
+  // 带时间戳绕开 CDN 缓存，避免按旧版本号比对（与 version.js 保持一致）
+  const promise = getDirectInfo(`${url}?t=${Date.now()}`)
 
   return promise.catch(async(err) => {
     index++

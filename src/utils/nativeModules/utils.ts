@@ -20,6 +20,24 @@ export const getVersionName = (): string | undefined => {
 
 export const installApk = (filePath: string, fileProviderAuthority: string) => UtilsModule.installApk(filePath, fileProviderAuthority)
 
+/** 读 APK 文件自身的 versionName（不安装）；解析失败返回空串 */
+export const getApkVersionName = (filePath: string): string => {
+  try {
+    return (UtilsModule.getApkVersionName as ((filePath: string) => string) | undefined)?.(filePath) ?? ''
+  } catch (e) {
+    return ''
+  }
+}
+
+/** 读 APK 文件自身的 versionCode（不安装）；解析失败返回 0 */
+export const getApkVersionCode = (filePath: string): number => {
+  try {
+    return (UtilsModule.getApkVersionCode as ((filePath: string) => number) | undefined)?.(filePath) ?? 0
+  } catch (e) {
+    return 0
+  }
+}
+
 
 export const screenkeepAwake = () => {
   if (global.lx.isScreenKeepAwake) return
