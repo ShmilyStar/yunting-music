@@ -161,12 +161,6 @@ public class LyricView extends Activity implements View.OnTouchListener {
       WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
       WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
 
-    // 面板是靠「把窗口改高」展开的，而部分 ROM（实测平板上有）会给窗口的
-    // 尺寸变化套一段 200~300ms 的缓动，于是展开时整块面板「滑一下 / 闪一下」；
-    // 手机上没有这段动画，所以同一份代码只在平板上看得到。
-    // PRIVATE_FLAG_NO_MOVE_ANIMATION（@hide，固定为 0x40）就是关掉这个过渡动画，
-    // 窗口尺寸依然立即生效，只是不再被系统补一段动画。
-    flag |= 0x00000040;
 
     if (isLock || !isTouchable) {
       flag = flag | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
