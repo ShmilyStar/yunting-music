@@ -48,6 +48,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private FrameLayout container = null;
   private LyricSwitchView textView = null;
   private LyricControlPanel panel = null;
+  /** 收起面板时接住「歌词带」触摸的透明小窗（主窗此时不可点，避免挡住桌面） */
+  private View touchLayer = null;
+  private WindowManager.LayoutParams touchParams = null;
   private WindowManager windowManager = null;
   private WindowManager.LayoutParams layoutParams = null;
   final private ReactApplicationContext reactContext;
@@ -155,14 +158,14 @@ public class LyricView extends Activity implements View.OnTouchListener {
     orientationEventListener.disable();
   }
 
-  private int getLayoutParamsFlags() {
+  private int getLayoutParamsFlags(boolean touchable) {
     int flag = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
       WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
       WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
 
 
-    if (isLock || !isTouchable) {
+    if (!touchable || isLock || !isTouchable) {
       flag = flag | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
     }
 
@@ -290,9 +293,11 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 自上而下是宽度条 → 设置行 → 控制行 → 歌词区。
     // 两种排法都不许动歌词的屏幕位置：一动，面板开合就成了「闪一下」。
     // 注意这里也不压缩歌词区：压缩会让歌词在展开时跳位，宁可让窗口超出屏幕底部。
-    float controlRow = isPanelVisible ? dp(CONTROL_ROW_HEIGHT_DP) : 0;
-    float settingsRow = isPanelVisible && isSettingsVisible ? dp(SETTINGS_ROW_HEIGHT_DP) : 0;
-    float widthRow = isPanelVisible && isSettingsVisible ? dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP) : 0;
+    // 【双窗】窗口高度固定为「歌词区 + 全部面板行」：开合面板不再改尺寸。
+    // 面板收起时主窗整块不可点（见 updateHeights 末尾），由触摸小窗接住歌词带的点击。
+    float controlRow = dp(CONTROL_ROW_HEIGHT_DP);
+    float settingsRow = dp(SETTINGS_ROW_HEIGHT_DP);
+    float widthRow = dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP);
     float rows = controlRow + settingsRow + widthRow;
 
     float total = lyricHeight + rows;
@@ -356,8 +361,31 @@ public class LyricView extends Activity implements View.OnTouchListener {
     lastAppliedHeight = newH;
     lastAppliedX = newX;
     lastAppliedY = newY;
+    // 主窗只有在面板展开时才吃触摸；收起时让触摸小窗接管歌词带，其余位置点穿
+    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
+    syncTouchLayer();
     if (changed && container != null && container.getParent() != null) {
       commitWindowGeometry(true);
+    }
+  }
+
+  /** 触摸小窗始终贴着歌词带；面板展开时它自己变成不可点，避免和主窗抢事件 */
+  private void syncTouchLayer() {
+    if (touchLayer == null || touchParams == null || windowManager == null || layoutParams == null) return;
+    touchParams.width = layoutParams.width;
+    touchParams.height = Math.round(lyricHeight);
+    touchParams.x = layoutParams.x;
+    touchParams.y = layoutParams.y;
+    int base = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+      WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
+      WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+      WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+    if (isPanelVisible || isLock || !isTouchable) base |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+    touchParams.flags = base;
+    if (touchLayer.getParent() == null) {
+      try { windowManager.addView(touchLayer, touchParams); } catch (Exception ignored) { }
+    } else {
+      try { windowManager.updateViewLayout(touchLayer, touchParams); } catch (Exception ignored) { }
     }
   }
 
@@ -585,6 +613,14 @@ public class LyricView extends Activity implements View.OnTouchListener {
       FrameLayout.LayoutParams.MATCH_PARENT,
       FrameLayout.LayoutParams.MATCH_PARENT));
     container.setOnTouchListener(this);
+    // 【双窗】透明触摸小窗：只覆盖歌词带，收起面板时由它接点击/拖动
+    touchLayer = new View(reactContext);
+    touchLayer.setOnTouchListener(this);
+    touchParams = new WindowManager.LayoutParams();
+    touchParams.type = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ?
+      WindowManager.LayoutParams.TYPE_SYSTEM_ALERT : WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+    touchParams.gravity = Gravity.TOP | Gravity.START;
+    touchParams.format = PixelFormat.TRANSPARENT;
   }
 
   private void handleShowLyric() {
@@ -605,7 +641,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
     layoutParams.type = Build.VERSION.SDK_INT < Build.VERSION_CODES.O ?
       WindowManager.LayoutParams.TYPE_SYSTEM_ALERT :
       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-    layoutParams.flags = getLayoutParamsFlags();
+    // 【双窗】主窗（歌词+面板）默认不可点：面板收起时它虽然铺着，但不吃触摸
+    layoutParams.flags = getLayoutParamsFlags(false);
     layoutParams.alpha = 1.0f;
     layoutParams.gravity = Gravity.TOP | Gravity.START;
 
@@ -969,7 +1006,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     isTouchable = touchable;
     if (!touchable) hidePanel();
     if (windowManager == null || container == null) return;
-    layoutParams.flags = getLayoutParamsFlags();
+    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
     windowManager.updateViewLayout(container, layoutParams);
   }
 
@@ -1078,7 +1115,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (panel != null) panel.setLocked(true);
     hidePanel();
     if (windowManager == null || container == null) return;
-    layoutParams.flags = getLayoutParamsFlags();
+    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
     windowManager.updateViewLayout(container, layoutParams);
   }
 
@@ -1086,7 +1123,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     isLock = false;
     if (panel != null) panel.setLocked(false);
     if (windowManager == null || container == null) return;
-    layoutParams.flags = getLayoutParamsFlags();
+    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
     windowManager.updateViewLayout(container, layoutParams);
   }
 
