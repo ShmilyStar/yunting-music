@@ -88,7 +88,12 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private float appliedTextSize = -1f;
   private int maxWidth = 0;
   private int maxHeight = 0;
+  /** 当前歌词块高度（真正带底色的那一段） */
   private float lyricHeight = 0;
+  /** 固定歌词带高度：按「最大可设行数 + 1 行」预留，行数 ± 与换行都不改窗口尺寸 */
+  private float bandHeight = 0;
+  /** 当前文本真实排版高度（超过预留行数时用，比如长句折行），换句时清零 */
+  private int measuredContentHeight = 0;
 
   private int maxLineNum = 2;
   private String currentLyric = "云听音乐 ^-^";
@@ -158,18 +163,16 @@ public class LyricView extends Activity implements View.OnTouchListener {
     orientationEventListener.disable();
   }
 
-  private int getLayoutParamsFlags(boolean touchable) {
-    int flag = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+  /**
+   * 主窗永远不可点：所有手势都由透明的触摸小窗接收。
+   * 主窗高度里有看不见的预留留白，可点的话会把桌面图标的点击吞掉。
+   */
+  private int getLayoutParamsFlags() {
+    return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
+      WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE |
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
       WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
       WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-
-
-    if (!touchable || isLock || !isTouchable) {
-      flag = flag | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
-    }
-
-    return flag;
   }
 
   /**
@@ -220,33 +223,33 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 上下留白给行高，左右留白避开面板上的图标；视图本身占满窗口宽度，文字才会真正居中
     textView.setPadding(inset, verticalPadding, inset, verticalPadding);
 
-    // 高度直接量「真正负责绘制的那个 TextView」：它是唯一和实际渲染完全一致的东西。
+    // 【固定歌词带】窗口高度按「最大可设行数 + 1 行」一次性预留，行数 ± 只挪歌词块，
+    // 不改窗口尺寸 —— 窗口一变尺寸系统就会补一段 bounds 动画，看起来就是闪一下。
     //
-    // 踩过的两个坑：按「逻辑行数 × 行高」估算会漏掉英文折行；StaticLayout 自算
-    // 又和 TextView 的行距/内边距口径差几像素，表现为最后一行被裁。
-    // 这里直接 measure 当前子 TextView（宽 EXACTLY、高 UNSPECIFIED）。
-    // 注意：子 TextView 被 setHeight 钉过高度，直接 measure 只会拿回那个旧值，
-    // 必须先解绑，量完再放回去（后面 updateHeights 会重新钉）。
-    int availableWidth = layoutParams == null ? 0 : layoutParams.width;
-    int height = 0;
-    android.widget.TextView measured = (android.widget.TextView) textView.getCurrentView();
-    if (availableWidth > 0 && measured != null) {
-      int pinned = measured.getHeight();
-      if (pinned > 0) measured.setHeight(-1);
-      measured.measure(
-        android.view.View.MeasureSpec.makeMeasureSpec(availableWidth, android.view.View.MeasureSpec.EXACTLY),
-        android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED));
-      height = measured.getMeasuredHeight();
-      if (pinned > 0) measured.setHeight(pinned);
+    // 行高一律按基准字号算：单行模式会把字号临时缩小，跟着缩小的话每句歌词都会
+    // 改一次带宽，等于每句都闪。
+    float sizeRatio = appliedTextSize > 0 ? textSize / appliedTextSize : 1f;
+    int linePx = Math.round(paint.getFontMetricsInt(null) * 1.18f * sizeRatio);
+    if (linePx <= 0) linePx = Math.round(dp(20) * 1.18f);
+
+    int reservedLines = isSingleLine ? 1 : Math.max(1, maxLineNum) + 1;
+    int bandLines = isSingleLine ? 1 : LyricControlPanel.MAX_LINE + 1;
+    if (bandLines < reservedLines) bandLines = reservedLines;
+    int pad = verticalPadding * 2;
+
+    int band = linePx * bandLines + pad;
+    if (maxHeight > 0) {
+      int cap = maxHeight - Math.round(panelRowsPx()) - 100;
+      if (band > cap) band = Math.max(linePx + pad, cap);
     }
-    if (height <= 0) {
-      int lines = isSingleLine ? 1 : Math.max(1, Math.min(maxLineNum, Math.max(1, countLyricLines())));
-      int fm = paint.getFontMetricsInt(null);
-      height = Math.round(fm * 1.18f) * lines + verticalPadding * 2;
-    }
-    if (height > maxHeight - 100) height = maxHeight - 100;
-    if (height < 1) height = 1;
-    lyricHeight = height;
+    int used = linePx * reservedLines + pad;
+    // 长句折行后比预留行还高时，歌词块在带内向上长（窗口尺寸不变）
+    if (measuredContentHeight > used) used = Math.min(measuredContentHeight, band);
+    if (used > band) used = band;
+    if (band < 1) band = 1;
+    if (used < 1) used = 1;
+    bandHeight = band;
+    lyricHeight = used;
   }
 
   /** 当前歌词实际会显示的行数（原句 + 翻译 / 下一句），用于按内容收高歌词区 */
@@ -272,11 +275,12 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (layoutParams.x < 0) layoutParams.x = 0;
     else if (layoutParams.x > maxX) layoutParams.x = maxX;
 
-    // 纵向只按「歌词区」的高度约束：面板展开只是临时占位，
-    // 用整个窗口高度去夹会把歌词推走
-    int maxY = maxHeight - Math.round(lyricHeight + panelRowsPx());
+    // 窗口高度恒为「歌词带 + 面板行」，整窗都要留在屏幕里；窗口顶边可以越过屏幕上沿，
+    // 因为歌词块贴在带的底部，带上面那段空白是透明的、看不见
+    int maxY = maxHeight - Math.round(bandHeight + panelRowsPx());
     if (maxY < 0) maxY = 0;
-    if (layoutParams.y < 0) layoutParams.y = 0;
+    int minY = -Math.round(bandHeight - lyricHeight);
+    if (layoutParams.y < minY) layoutParams.y = minY;
     else if (layoutParams.y > maxY) layoutParams.y = maxY;
   }
 
@@ -300,25 +304,21 @@ public class LyricView extends Activity implements View.OnTouchListener {
     float widthRow = dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP);
     float rows = controlRow + settingsRow + widthRow;
 
-    float total = lyricHeight + rows;
+    // 窗口高度 = 固定歌词带 + 全部面板行：开合面板、行数 ±、换行都不改尺寸。
+    float total = bandHeight + rows;
     // 换行时整体只上移一行（逐行滚动），不是整屏从底部涌上来
     textView.setAnimaDistance(oneLineHeight());
     layoutParams.height = Math.round(total);
 
-    clampPosition();
-
-    // 歌词区在屏幕上的位置：展开前记下的位置优先，没记就用当前窗口位置
-    int lyricAnchor = isPanelVisible && lyricTopBeforePanel != Integer.MIN_VALUE
-      ? lyricTopBeforePanel : layoutParams.y;
-    int lyricMaxY = Math.max(0, maxHeight - Math.round(lyricHeight + panelRowsPx()));
-    if (lyricAnchor < 0) lyricAnchor = 0;
-    else if (lyricAnchor > lyricMaxY) lyricAnchor = lyricMaxY;
+    // 歌词块贴在带的底部（紧挨面板），带上面多出来的空间是透明的：
+    // 行数变多时歌词块向上长，面板和窗口都不动。
+    int contentTop = Math.max(0, Math.round(bandHeight - lyricHeight));
+    lyricContentTop = contentTop;
 
     // 面板永远在歌词下方：位置一旦翻转，窗口就要整体上移，系统会补一段移动动画 = 闪。
-    // 代价是歌词不能拖到贴着屏幕底边（下面要留给面板），拖动与落位都按 panelRowsPx() 预留。
     panelAbove = false;
-    lyricContentTop = 0;
-    layoutParams.y = lyricAnchor;
+    // 这里不再夹取窗口位置：行数 / 字号重排时窗口一移动就会被系统补一段移动动画。
+    // 位置只在拖动和按百分比还原时夹（clampPosition），歌词块顶边可以越过屏幕上沿。
 
     if (layoutParams.width > 0) {
       // 歌词视图的高度固定为「歌词区高度」：多行歌词需要足够的绘制区域，
@@ -331,8 +331,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
         textLp.topMargin = lyricContentTop;
         textView.setLayoutParams(textLp);
       }
-      android.graphics.Rect clip = new android.graphics.Rect(0, 0, layoutParams.width, Math.round(lyricHeight));
-      textView.setClipBounds(clip);
+      // 歌词视图的高度就是歌词块高度，本来就不需要额外的裁剪；
+      // 之前按窗口坐标设过裁剪，坐标换算到视图内等于把整块裁没了
+      textView.setClipBounds(null);
       FrameLayout.LayoutParams panelLp = (FrameLayout.LayoutParams) panel.getLayoutParams();
       if (panelLp != null) {
         panelLp.width = layoutParams.width;
@@ -342,6 +343,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
       textView.setWidth(layoutParams.width);
       textView.setHeight(Math.round(lyricHeight));
       textView.requestLayout();
+      panel.setLyricTop(contentTop);
       panel.setLyricHeight(lyricHeight);
       // 面板内部按「歌词区 → 控制行 → 设置行 → 宽度条」的实际像素排布（向上展开时镜像），
       // 行高随屏幕密度换算，手机 / 平板都按同一套比例走
@@ -361,38 +363,36 @@ public class LyricView extends Activity implements View.OnTouchListener {
     lastAppliedHeight = newH;
     lastAppliedX = newX;
     lastAppliedY = newY;
-    // 主窗只有在面板展开时才吃触摸；收起时让触摸小窗接管歌词带，其余位置点穿
-    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
+    // 主窗永远不吃触摸：整块交给透明的触摸小窗，歌词带之外的空白才能点穿到桌面
+    layoutParams.flags = getLayoutParamsFlags();
     syncTouchLayer();
     if (changed && container != null && container.getParent() != null) {
       commitWindowGeometry(true);
     }
   }
 
-  /**
-   * 按「面板是否展开」重新分配触摸：
-   *   展开 → 主窗可点（歌词 + 面板都能操作），小窗退场；
-   *   收起 → 主窗不可点（不挡桌面），小窗只覆盖歌词带负责点击 / 拖动。
-   * 两者尺寸都不变，所以不会有窗口尺寸动画。
-   */
+  /** 触摸只由透明小窗接收：主窗始终不可点，歌词带之外的空白不会挡住桌面 */
   private void applyTouchFlags() {
     if (layoutParams == null || windowManager == null || container == null) return;
-    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
-    try { windowManager.updateViewLayout(container, layoutParams); } catch (Exception ignored) { }
+    layoutParams.flags = getLayoutParamsFlags();
     syncTouchLayer();
   }
-  /** 触摸小窗始终贴着歌词带；面板展开时它自己变成不可点，避免和主窗抢事件 */
+  /**
+   * 触摸小窗贴着「歌词块」，面板展开时向下盖住面板行。
+   * 它是一层全透明的窗口，尺寸变化没有可见动画，所以可以随便跟随内容。
+   */
   private void syncTouchLayer() {
     if (touchLayer == null || touchParams == null || windowManager == null || layoutParams == null) return;
     touchParams.width = layoutParams.width;
-    touchParams.height = Math.round(lyricHeight);
+    touchParams.height = Math.round(lyricHeight) +
+      (isPanelVisible ? Math.round(panelRowsPx()) : 0);
     touchParams.x = layoutParams.x;
-    touchParams.y = layoutParams.y;
+    touchParams.y = layoutParams.y + lyricContentTop;
     int base = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
       WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
       WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
-    if (isPanelVisible || isLock || !isTouchable) base |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+    if (isLock || !isTouchable) base |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
     touchParams.flags = base;
     if (touchLayer.getParent() == null) {
       try { windowManager.addView(touchLayer, touchParams); } catch (Exception ignored) { }
@@ -450,17 +450,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private int lastAppliedX = Integer.MIN_VALUE;
   private int lastAppliedY = Integer.MIN_VALUE;
 
-  /**
-   * 面板展开 / 收起时保持歌词位置不变。
-   *
-   * 面板展开会让窗口向下长高，靠近屏幕底部时 clampPosition 会把窗口整体往上推，
-   * 歌词就跟着挪了。这里在展开前记下歌词的屏幕位置，收起后按记录位置还原。
-   */
-  private int lyricTopBeforePanel = Integer.MIN_VALUE;
-
   /** 面板排在歌词上方（歌词下面放不下）还是下方 */
   private boolean panelAbove = false;
-  /** 歌词区在窗口内的起点 y：向上展开时它等于面板那几行的高度，其余情况为 0 */
+  /** 歌词块在窗口内的起点 y：固定歌词带顶部那段透明留白的高度 */
   private int lyricContentTop = 0;
 
   private void updateViewPosition() {
@@ -495,17 +487,14 @@ public class LyricView extends Activity implements View.OnTouchListener {
     else if (x > maxX) x = maxX;
     layoutParams.x = x;
 
-    // 面板展开时不要按百分比重算 y：此时窗口高度包含面板，按旧的百分比算会跳位 / 闪动，
-    // 位置由 updateHeights 里记录的展开前 y 或拖动结果决定
-    if (isPanelVisible && lyricTopBeforePanel != Integer.MIN_VALUE) {
-      layoutParams.y = lyricTopBeforePanel - lyricContentTop;
-      return;
-    }
-    int maxY = maxHeight - Math.round(lyricHeight + panelRowsPx());
-    int y = (int) (maxHeight * prevViewPercentageY);
-    if (y < 0) y = 0;
-    else if (y > maxY) y = maxY;
-    layoutParams.y = y;
+    // 百分比记的是「歌词块顶边」的屏幕位置；窗口顶边在它上面 contentTop 处，
+    // 所以这里先按百分比还原歌词块顶边，再倒推窗口位置
+    int maxStripTop = Math.max(0, maxHeight - Math.round(lyricHeight + panelRowsPx()));
+    int stripTop = Math.round(maxHeight * prevViewPercentageY);
+    if (stripTop < 0) stripTop = 0;
+    else if (stripTop > maxStripTop) stripTop = maxStripTop;
+    layoutParams.y = stripTop - lyricContentTop;
+    clampPosition();
   }
 
   public void sendPositionEvent(float x, float y) {
@@ -641,10 +630,15 @@ public class LyricView extends Activity implements View.OnTouchListener {
       layoutParams = new WindowManager.LayoutParams();
     }
 
-    // 悬浮窗只有一个：重新显示时先把旧的移除，避免重复 addView
+    // 悬浮窗只有一个：重新显示时先把旧的（主窗 + 触摸小窗）移除，避免重复 addView
     if (container != null) {
       try {
         windowManager.removeView(container);
+      } catch (Exception ignored) { /* 已经被移除 */ }
+    }
+    if (touchLayer != null && touchLayer.getParent() != null) {
+      try {
+        windowManager.removeView(touchLayer);
       } catch (Exception ignored) { /* 已经被移除 */ }
     }
 
@@ -654,7 +648,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
       WindowManager.LayoutParams.TYPE_SYSTEM_ALERT :
       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
     // 【双窗】主窗（歌词+面板）默认不可点：面板收起时它虽然铺着，但不吃触摸
-    layoutParams.flags = getLayoutParamsFlags(false);
+    layoutParams.flags = getLayoutParamsFlags();
     layoutParams.alpha = 1.0f;
     layoutParams.gravity = Gravity.TOP | Gravity.START;
 
@@ -685,6 +679,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     applySingleLineTextSize();
     // 高度是直接量当前子 TextView 的，量之前文本必须已经是这一句
     int before = Math.round(lyricHeight);
+    measuredContentHeight = 0;
     textView.setText(buildLyricText());
     setLayoutParamsHeight();
     // 行数变化（有翻译 / 没翻译）时歌词区高度要跟着调，窗口只向下长，
@@ -745,15 +740,13 @@ public class LyricView extends Activity implements View.OnTouchListener {
     textView.setTextSize(sp);
   }
 
-  /** 按歌词视图真实排版高度校正歌词区高度（只增不减，避免来回抖动） */
+  /** 按歌词视图真实排版高度校正歌词块高度（只增不减，且不超过固定带的容量） */
   private void fitLyricHeightToContent() {
     if (textView == null || layoutParams == null) return;
-    int contentHeight = textView.getContentHeight();
+    int contentHeight = Math.round(textView.getContentHeight());
     if (contentHeight <= 0) return;
-    int limit = maxHeight - 100;
-    if (contentHeight > limit) contentHeight = limit;
     if (contentHeight <= Math.round(lyricHeight)) return;
-    lyricHeight = contentHeight;
+    measuredContentHeight = contentHeight;
     updateHeights();
   }
 
@@ -813,18 +806,10 @@ public class LyricView extends Activity implements View.OnTouchListener {
 
   private void showPanel() {
     if (isLock || !isTouchable || panel == null) return;
-    // 记住展开前的窗口 y：展开时长高、收起时还原，歌词在两种状态下都停在原处。
-    // 以百分比反推，保证用户拖动后的位置被正确沿用（不用 layoutParams.y，
-    // 它可能正被上一次的夹取改写）
-    if (!isPanelVisible && layoutParams != null) {
-      int maxY = Math.max(0, Math.round(maxHeight - lyricHeight));
-      int baseY = Math.round(maxHeight * prevViewPercentageY);
-      lyricTopBeforePanel = Math.max(0, Math.min(maxY, baseY));
-    }
+    // 窗口尺寸是固定的，展开 / 收起都不动几何，歌词自然停在原处
     isPanelVisible = true;
     isSettingsVisible = false;
     panel.setSettingsVisible(false);
-    // 面板立刻可见：commitWindowGeometry 会在提交窗口前把它按新尺寸量好画好
     panel.setVisibility(View.VISIBLE);
     updateHeights();
     applyTouchFlags();
@@ -836,15 +821,6 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (!isPanelVisible) return;
     isPanelVisible = false;
     isSettingsVisible = false;
-    // 收起后面板不再占高度，先把「展开前的位置」写回基准百分比，
-    // 这样 updateHeights 一次就能把窗口按正确位置和高度摆好，不会先跳一下再归位
-    if (lyricTopBeforePanel != Integer.MIN_VALUE && layoutParams != null) {
-      int maxY = Math.max(0, maxHeight - Math.round(lyricHeight));
-      int y = Math.max(0, Math.min(maxY, lyricTopBeforePanel));
-      layoutParams.y = y;
-      prevViewPercentageY = (float) y / (float) maxHeight;
-      lyricTopBeforePanel = Integer.MIN_VALUE;
-    }
     if (panel != null) {
       // 先隐藏面板，再由 updateHeights 一次性把窗口缩回歌词区高度，
       // 避免「窗口还高着、面板已经消失」的残影
@@ -944,8 +920,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
     FrameLayout.LayoutParams textLp = (FrameLayout.LayoutParams) textView.getLayoutParams();
     if (textLp != null) {
       textLp.width = layoutParams.width;
-      // 歌词视图始终只占歌词区，不能跟着窗口高度（含面板行）一起长
+      // 歌词视图始终只占歌词块，不能跟着窗口高度（含面板行 / 留白）一起长
       textLp.height = Math.round(lyricHeight);
+      textLp.topMargin = lyricContentTop;
       textView.setLayoutParams(textLp);
     }
     FrameLayout.LayoutParams panelLp = (FrameLayout.LayoutParams) panel.getLayoutParams();
@@ -999,6 +976,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (textView == null) return;
     if (!isSingleLine) textView.setMaxLines(maxLineNum);
     // 先换文本再量高度：顺序反过来会用旧文本算出行高，窗口要等到下一句歌词才跟着变
+    measuredContentHeight = 0;
     textView.setText(buildLyricText());
     applySingleLineTextSize();
     updateHeights();
@@ -1063,14 +1041,17 @@ public class LyricView extends Activity implements View.OnTouchListener {
           float tranX = nowX - lastX;
           float tranY = nowY - lastY;
           int maxX = maxWidth - layoutParams.width;
-          int maxY = maxHeight - Math.round(lyricHeight + panelRowsPx());
+          // 整窗（带 + 面板行）要留在屏幕内；窗口顶边允许越过屏幕上沿，
+          // 带顶部那段留白是透明的，看不见
+          int maxY = maxHeight - Math.round(bandHeight + panelRowsPx());
+          int minY = -lyricContentTop;
           if (maxX < 0) maxX = 0;
           if (maxY < 0) maxY = 0;
           int x = layoutParams.x + (int) tranX;
           if (x < 0) x = 0;
           else if (x > maxX) x = maxX;
           int y = layoutParams.y + (int) tranY;
-          if (y < 0) y = 0;
+          if (y < minY) y = minY;
           else if (y > maxY) y = maxY;
           layoutParams.x = x;
           layoutParams.y = y;
@@ -1094,8 +1075,6 @@ public class LyricView extends Activity implements View.OnTouchListener {
           float percentageY = (float) lyricY / (float) maxHeight * 100f;
           prevViewPercentageX = percentageX / 100f;
           prevViewPercentageY = percentageY / 100f;
-          // 已展开面板时，这个位置就是面板收起后应该回到的位置
-          if (isPanelVisible) lyricTopBeforePanel = lyricY;
           sendPositionEvent(percentageX, percentageY);
         } else {
           // 面板坐标以窗口左上角为原点，而事件给的是屏幕坐标：x、y 都要减掉窗口偏移。
@@ -1128,17 +1107,13 @@ public class LyricView extends Activity implements View.OnTouchListener {
     isLock = true;
     if (panel != null) panel.setLocked(true);
     hidePanel();
-    if (windowManager == null || container == null) return;
-    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
-    windowManager.updateViewLayout(container, layoutParams);
+    applyTouchFlags();
   }
 
   public void unlockView() {
     isLock = false;
     if (panel != null) panel.setLocked(false);
-    if (windowManager == null || container == null) return;
-    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
-    windowManager.updateViewLayout(container, layoutParams);
+    applyTouchFlags();
   }
 
   public void setColor(String unplayColor, String playedColor, String shadowColor) {
@@ -1211,6 +1186,12 @@ public class LyricView extends Activity implements View.OnTouchListener {
         windowManager.removeView(container);
       } catch (Exception ignored) { }
     }
+    if (touchLayer != null && windowManager != null && touchLayer.getParent() != null) {
+      try {
+        windowManager.removeView(touchLayer);
+      } catch (Exception ignored) { }
+    }
+    touchLayer = null;
     container = null;
     textView = null;
     panel = null;
