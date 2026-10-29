@@ -369,6 +369,18 @@ public class LyricView extends Activity implements View.OnTouchListener {
     }
   }
 
+  /**
+   * 按「面板是否展开」重新分配触摸：
+   *   展开 → 主窗可点（歌词 + 面板都能操作），小窗退场；
+   *   收起 → 主窗不可点（不挡桌面），小窗只覆盖歌词带负责点击 / 拖动。
+   * 两者尺寸都不变，所以不会有窗口尺寸动画。
+   */
+  private void applyTouchFlags() {
+    if (layoutParams == null || windowManager == null || container == null) return;
+    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
+    try { windowManager.updateViewLayout(container, layoutParams); } catch (Exception ignored) { }
+    syncTouchLayer();
+  }
   /** 触摸小窗始终贴着歌词带；面板展开时它自己变成不可点，避免和主窗抢事件 */
   private void syncTouchLayer() {
     if (touchLayer == null || touchParams == null || windowManager == null || layoutParams == null) return;
@@ -815,6 +827,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 面板立刻可见：commitWindowGeometry 会在提交窗口前把它按新尺寸量好画好
     panel.setVisibility(View.VISIBLE);
     updateHeights();
+    applyTouchFlags();
     scheduleHidePanel();
   }
 
@@ -839,6 +852,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
       panel.setVisibility(View.GONE);
     }
     updateHeights();
+    applyTouchFlags();
   }
 
   private void scheduleHidePanel() {
@@ -1005,9 +1019,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
   public void setTouchable(boolean touchable) {
     isTouchable = touchable;
     if (!touchable) hidePanel();
-    if (windowManager == null || container == null) return;
-    layoutParams.flags = getLayoutParamsFlags(isPanelVisible);
-    windowManager.updateViewLayout(container, layoutParams);
+    applyTouchFlags();
   }
 
   @Override
@@ -1063,6 +1075,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
           layoutParams.x = x;
           layoutParams.y = y;
           windowManager.updateViewLayout(container, layoutParams);
+          // 触摸小窗要跟着走，否则拖动后点击区域会留在原地
+          syncTouchLayer();
         }
         lastX = nowX;
         lastY = nowY;
