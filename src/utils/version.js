@@ -125,6 +125,8 @@ const getTargetAbi = async() => {
 }
 
 let downloadJobId = null
+/** 是否已有下载任务在跑：防止连点导致两个任务写同一个文件 */
+let isDownloading = false
 const noop = (total, download) => {}
 let apkSavePath
 
@@ -182,63 +184,106 @@ export const downloadNewVersion = async(version, onDownload = noop) => {
     return
   }
 
-  if (downloadJobId) stopDownload(downloadJobId)
+  // 同一时间只允许一个下载任务：连点两次会让两个下载写同一个文件，
+  // 装出来的就是「安装包损坏」
+  if (isDownloading) return
+  isDownloading = true
+  try {
+    if (downloadJobId) stopDownload(downloadJobId)
 
-  // 文件名带上版本号和 ABI：任何一个候选失败都不会把上一次的包当成这次的结果
-  const makeSavePath = (abi) => `${temporaryDirectoryPath}/lx-music-mobile-${version}-${abi}.apk`
+    // 文件名带上版本号和 ABI：任何一个候选失败都不会把上一次的包当成这次的结果
+    const makeSavePath = (abi) => `${temporaryDirectoryPath}/lx-music-mobile-${version}-${abi}.apk`
 
-  const primaryAbi = await getTargetAbi()
-  // 首选设备自己的 ABI；万一该发行版没传这个 ABI（404），
-  // 再依次退到其它 ABI / universal，避免整条更新链直接失败
-  const candidateAbis = [primaryAbi, ...abis.filter(a => a !== primaryAbi)]
+    const primaryAbi = await getTargetAbi()
+    // 首选设备自己的 ABI；万一该发行版没传这个 ABI（404），
+    // 再依次退到其它 ABI / universal，避免整条更新链直接失败
+    const candidateAbis = [primaryAbi, ...abis.filter(a => a !== primaryAbi)]
 
-  let lastErr = null
-  for (const abi of candidateAbis) {
-    const savePath = makeSavePath(abi)
-    // 同一 ABI 先试 Gitee，再试 GitHub
-    for (const buildUrl of [giteeApkUrl, githubApkUrl]) {
-      const url = buildUrl(version, abi)
-      try {
-        // 先清掉同名残留，避免把上一次的包当成本次下载结果
-        try {
-          if (await RNFS.exists(savePath)) await RNFS.unlink(savePath)
-        } catch (e) { /* 清不掉就交给下载覆盖 */ }
-        console.log('[update] downloading:', url)
-        await downloadOne(url, savePath, onDownload)
-        // 关键校验：解析刚下载的 APK 自身版本，必须等于目标版本。
-        // 不校验的话，拿到旧包（缓存 / CDN 回源 / 下载被替换）会直接交给安装器，
-        // 用户看到的就是「下载安装完，版本没变」。
-        const apkVersion = getApkVersionName(savePath)
-        console.log('[update] downloaded apk version:', apkVersion, 'expected:', version)
-        if (apkVersion !== version) {
-          throw new Error(`apk version mismatch: ${apkVersion || 'unknown'} != ${version}`)
+    let lastErr = null
+    for (const abi of candidateAbis) {
+      const savePath = makeSavePath(abi)
+      // 先下到 .part，校验通过后再改名为正式文件：
+      // 安装器永远拿不到一个可能还没写完 / 被写坏的文件
+      const partPath = `${savePath}.part`
+      // 同一 ABI 先试 Gitee，再试 GitHub
+      for (const buildUrl of [giteeApkUrl, githubApkUrl]) {
+        const url = buildUrl(version, abi)
+        // 同一个源失败后再试一次：手机网络抖动 / 服务端提前断开很常见
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            await removeIfExists(partPath)
+            await removeIfExists(savePath)
+            console.log('[update] downloading:', url, 'attempt', attempt + 1)
+            const { bytesWritten, contentLength } = await downloadOne(url, partPath, onDownload)
+            // 大小对不上 = 文件不完整，直接重试
+            if (contentLength > 0 && bytesWritten > 0 && bytesWritten !== contentLength) {
+              throw new Error(`size mismatch: ${bytesWritten} != ${contentLength}`)
+            }
+            // 关键校验：解析刚下载的 APK 自身版本，必须等于目标版本。
+            // 不校验的话，拿到旧包 / 坏包会直接交给安装器，
+            // 用户看到的就是「装完版本没变」或「安装包损坏」。
+            const apkVersion = getApkVersionName(partPath)
+            console.log('[update] downloaded apk version:', apkVersion, 'expected:', version)
+            if (apkVersion !== version) {
+              throw new Error(`apk version mismatch: ${apkVersion || 'unknown'} != ${version}`)
+            }
+            await moveFile(partPath, savePath)
+            apkSavePath = savePath
+            // 下载完直接拉起系统安装器，把「安装」这一步交给用户
+            return await updateApp()
+          } catch (err) {
+            lastErr = err
+            console.log('[update] candidate failed:', abi, url, err && (err.message || err))
+            await removeIfExists(partPath)
+            await removeIfExists(savePath)
+          }
         }
-        apkSavePath = savePath
-        // 下载完直接拉起系统安装器，把「安装」这一步交给用户
-        return updateApp()
-      } catch (err) {
-        lastErr = err
-        console.log('[update] candidate failed:', abi, url, err && (err.message || err))
-        try {
-          if (await RNFS.exists(savePath)) await RNFS.unlink(savePath)
-        } catch (e) { /* ignore */ }
       }
     }
+    throw lastErr ?? new Error('no download candidate')
+  } finally {
+    // 这里就是下载任务的收尾，不存在并发写入问题（进入时已经拦掉了重入）
+    // eslint-disable-next-line require-atomic-updates
+    isDownloading = false
   }
-  throw lastErr ?? new Error('no download candidate')
 }
 
-/** 下载单个 ABI 的包；HTTP 非 200 或没落盘都视为失败 */
+/** 删文件，删不掉也不影响后续流程 */
+const removeIfExists = async(path) => {
+  try {
+    if (await RNFS.exists(path)) await RNFS.unlink(path)
+  } catch (e) { /* ignore */ }
+}
+
+/** 同一目录内改名（原子操作）；个别文件系统不支持时退回拷贝 */
+const moveFile = async(from, to) => {
+  try {
+    await RNFS.moveFile(from, to)
+  } catch (e) {
+    await RNFS.copyFile(from, to)
+    await removeIfExists(from)
+  }
+}
+
+/**
+ * 下载单个 ABI 的包；HTTP 非 200 或没落盘都视为失败。
+ *
+ * 返回 `{ bytesWritten, contentLength }`，供调用方校验文件是否完整：
+ * 服务端提前断开时 RNFS 仍可能 resolve，但文件是残缺的，交给安装器就是「安装包损坏」。
+ */
 const downloadOne = (url, savePath, onDownload) => {
+  let contentLength = 0
   const { jobId, promise } = downloadFile(url, savePath, {
     progressInterval: 500,
     connectionTimeout: 20000,
     readTimeout: 30000,
-    begin({ statusCode, contentLength }) {
-      onDownload(contentLength, 0)
+    begin({ statusCode, contentLength: total }) {
+      if (total > 0) contentLength = total
+      onDownload(total, 0)
     },
-    progress({ contentLength, bytesWritten }) {
-      onDownload(contentLength, bytesWritten)
+    progress({ contentLength: total, bytesWritten }) {
+      if (total > 0) contentLength = total
+      onDownload(total, bytesWritten)
     },
   })
   // 只清掉「自己」这个 job，避免用户连点两次时把后一个任务的 id 误清
@@ -259,6 +304,10 @@ const downloadOne = (url, savePath, onDownload) => {
     if (!(await RNFS.exists(savePath))) throw new Error('apk not written')
     const stat = await RNFS.stat(savePath)
     if (!stat || !stat.size) throw new Error('apk is empty')
+    return {
+      bytesWritten: result && result.bytesWritten ? result.bytesWritten : Number(stat.size),
+      contentLength,
+    }
   })
 }
 
