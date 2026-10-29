@@ -94,6 +94,13 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private float bandHeight = 0;
   /** 当前文本真实排版高度（超过预留行数时用，比如长句折行），换句时清零 */
   private int measuredContentHeight = 0;
+  /**
+   * 兼容模式：个别 ROM 会把负的窗口 y 夹到 0（不给悬浮窗越出屏幕上沿）。
+   * 那时「带顶留白」会让歌词整体下移，歌词也贴不到顶。
+   * 检测到这种 ROM 就退回「带高 = 当前歌词块、行数 ± 改窗口」的老策略。
+   */
+  private boolean noNegativeY = false;
+  private boolean yClampProbeInFlight = false;
 
   private int maxLineNum = 2;
   private String currentLyric = "云听音乐 ^-^";
@@ -233,7 +240,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (linePx <= 0) linePx = Math.round(dp(20) * 1.18f);
 
     int reservedLines = isSingleLine ? 1 : Math.max(1, maxLineNum) + 1;
-    int bandLines = isSingleLine ? 1 : LyricControlPanel.MAX_LINE + 1;
+    // 兼容模式不预留：带高 = 当前歌词块，窗口顶边永远 ≥ 0
+    int bandLines = noNegativeY ? reservedLines : (isSingleLine ? 1 : LyricControlPanel.MAX_LINE + 1);
     if (bandLines < reservedLines) bandLines = reservedLines;
     int pad = verticalPadding * 2;
 
@@ -417,6 +425,42 @@ public class LyricView extends Activity implements View.OnTouchListener {
       View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY));
     container.layout(0, 0, w, h);
     windowManager.updateViewLayout(container, layoutParams);
+    probeNegativeY();
+  }
+
+  /**
+   * 检查「负的窗口 y 有没有被系统夹住」。
+   *
+   * 只有窗口越出屏幕上沿（y < 0）时才需要检查：等 WMS 应用完位置后读一次
+   * 视图在屏幕上的真实位置，和期望值对不上就说明这个 ROM 不允许负 y，
+   * 切到兼容模式重排一次（带高 = 当前歌词块，窗口退回原来的行为）。
+   * 正常 ROM 上这段只会在贴顶时跑一两次，且不产生任何变化。
+   */
+  private void probeNegativeY() {
+    if (noNegativeY || yClampProbeInFlight) return;
+    if (layoutParams == null || container == null || container.getParent() == null) return;
+    if (layoutParams.y >= 0) return;
+    yClampProbeInFlight = true;
+    container.postDelayed(() -> {
+      yClampProbeInFlight = false;
+      if (noNegativeY || layoutParams == null || container == null) return;
+      if (layoutParams.y >= 0) return;
+      int[] loc = new int[2];
+      container.getLocationOnScreen(loc);
+      // 期望 y 为负，实际被抬到 0（或明显更靠下）＝ 系统夹了
+      if (loc[1] > layoutParams.y + 2) {
+        // 先按「歌词块顶边」把窗口落位（兼容模式 contentTop 恒为 0），再重排，
+        // 避免中间出现一帧歌词跑到屏幕外的残影
+        int stripTop = layoutParams.y + lyricContentTop;
+        noNegativeY = true;
+        layoutParams.y = Math.max(0, stripTop);
+        updateHeights();
+        fixViewPosition();
+        try {
+          windowManager.updateViewLayout(container, layoutParams);
+        } catch (Exception ignored) { }
+      }
+    }, 120);
   }
 
   private int lastAppliedWidth = -1;
@@ -438,6 +482,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     updateHeights();
     fixViewPosition();
     windowManager.updateViewLayout(container, layoutParams);
+    probeNegativeY();
   }
 
   /**
@@ -1059,6 +1104,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
           handleTap(downWindowX - winX, downWindowY - winY);
         }
         if (isPanelVisible) scheduleHidePanel();
+        // 拖到贴近屏幕上沿时，顺带检查负 y 是否被系统夹住（每帧查会太吵，松手查一次）
+        probeNegativeY();
         break;
     }
     return true;
