@@ -90,16 +90,16 @@ public class LyricControlPanel extends View {
   private ActionListener listener;
 
   private float lyricHeight = 0f;
+  /** 歌词块在窗口内的起点：窗口上方是预留的透明留白，面板底色不能画到那里 */
+  private float contentTop = 0f;
   /** 控制行 / 设置行 / 宽度条的实际像素高度，由 LyricView 下发 */
   private float controlRowPx = 0f;
   private float settingsRowPx = 0f;
   private float widthRowPx = 0f;
   private boolean settingsVisible = false;
-  /**
-   * 面板画在歌词上方还是下方。歌词靠近屏幕底部时下方放不下，
-   * 由 {@link LyricView} 改成向上展开，歌词的屏幕位置才不会为了腾地方而跳走。
-   */
-  private boolean above = false;
+  /** 设置行的展开进度 0~1：展开/收起在窗口内部做裁剪动画，不改窗口尺寸 */
+  private float settingsAnim = 0f;
+  private android.animation.ValueAnimator settingsAnimator = null;
   private boolean playing = false;
   private boolean locked = false;
   private boolean singleLineMode = false;
@@ -158,35 +158,39 @@ public class LyricControlPanel extends View {
     this.listener = listener;
   }
 
-  public void setLyricHeight(float lyricHeight) {
-    this.lyricHeight = lyricHeight;
-    invalidate();
-  }
-
   public void setSettingsVisible(boolean visible) {
+    if (settingsVisible == visible) return;
     settingsVisible = visible;
-    invalidate();
+    float target = visible ? 1f : 0f;
+    if (settingsAnimator != null) settingsAnimator.cancel();
+    settingsAnimator = android.animation.ValueAnimator.ofFloat(settingsAnim, target);
+    settingsAnimator.setDuration(160);
+    settingsAnimator.addUpdateListener(a -> {
+      settingsAnim = (float) a.getAnimatedValue();
+      invalidate();
+    });
+    settingsAnimator.start();
   }
 
-  /** 控制行 / 设置行 / 宽度条这几行的总高度 */
-  private float rowsHeight() {
-    return controlRowPx + (settingsVisible ? settingsRowPx + widthRowPx : 0f);
+  /** 当前真正画得到的高度（含歌词块上方的留白）：歌词块 + 控制行 + 设置行（按展开进度） */
+  private float visibleHeight() {
+    float base = contentTop + lyricHeight + controlRowPx;
+    return base + (settingsRowPx + widthRowPx) * settingsAnim;
   }
 
-  /** 歌词区在窗口内的起点 y：向上展开时这几行排在歌词上面 */
+  /** 歌词块在窗口内的起点 y */
   private float lyricTop() {
-    return above ? rowsHeight() : 0f;
+    return contentTop;
   }
 
-  /** 控制行中心 y：向下展开时紧接在歌词区下方，向上展开时贴在歌词区上沿 */
+  /** 控制行中心 y：紧接在歌词块下方 */
   private float controlCenterY() {
-    return above ? rowsHeight() - controlRowPx / 2f : lyricHeight + controlRowPx / 2f;
+    return contentTop + lyricHeight + controlRowPx / 2f;
   }
 
   /** 色点行中心 y */
   private float settingsCenterY() {
-    return above ? rowsHeight() - controlRowPx - settingsRowPx / 2f
-      : lyricHeight + controlRowPx + settingsRowPx / 2f;
+    return contentTop + lyricHeight + controlRowPx + settingsRowPx / 2f;
   }
 
   public void setPlaying(boolean playing) {
@@ -218,11 +222,13 @@ public class LyricControlPanel extends View {
   }
 
   /**
-   * 由 {@link LyricView} 在算完窗口高度后同步各段的实际像素高度：
-   * 歌词区、控制行、设置行、宽度条。面板里的所有坐标都从这里推出来，
+   * 由 {@link LyricView} 在算完窗口高度后同步各段的位置和实际像素高度：
+   * 歌词块起点、歌词块、控制行、设置行、宽度条。面板里的所有坐标都从这里推出来，
    * 不再自己按 dp 猜，屏幕密度变化或小屏压高度时排版仍然对齐。
    */
-  public void setLayout(float lyricHeightPx, float controlRowPx, float settingsRowPx, float widthRowPx) {
+  public void setLayout(float contentTopPx, float lyricHeightPx,
+                        float controlRowPx, float settingsRowPx, float widthRowPx) {
+    this.contentTop = contentTopPx;
     this.lyricHeight = lyricHeightPx;
     this.controlRowPx = controlRowPx;
     this.settingsRowPx = settingsRowPx;
@@ -230,21 +236,9 @@ public class LyricControlPanel extends View {
     invalidate();
   }
 
-  /** 面板排在歌词上方（true）还是下方（false），行的先后顺序也随之镜像 */
-  public void setAbove(boolean above) {
-    if (this.above == above) return;
-    this.above = above;
-    invalidate();
-  }
-
   public void setPlayedColor(int color) {
     playedColor = color;
     invalidate();
-  }
-
-  /** 面板总高度：歌词区 + 控制行 + （可选）设置行 + 宽度控制条 */
-  public float getPanelHeight() {
-    return lyricHeight + controlRowPx + (settingsVisible ? settingsRowPx + widthRowPx : 0);
   }
 
   @Override
@@ -254,8 +248,17 @@ public class LyricControlPanel extends View {
     float h = getHeight();
     if (w <= 0 || h <= 0) return;
 
-    // 面板整体上底色：从顶到底一整块，不分区
-    rect.set(0, 0, w, h);
+    // 窗口高度是固定预留的（见 LyricView.updateHeights），但底色只画到「当前真正用到的高度」：
+    // 歌词块上方是透明留白、设置行收起时下面几行也不留黑底，看起来就像窗口只有这么高。
+    float top = Math.min(Math.max(0f, contentTop), h);
+    float panelH = Math.min(visibleHeight(), h);
+    if (panelH <= top) return;
+
+    // 设置行展开/收起时在窗口内部做一次「自上而下揭开」：裁一段动画高度，
+    // 内容位置不动，靠裁剪露出来。窗口本身尺寸不变，所以系统没有可动画的东西。
+    int save = canvas.save();
+    canvas.clipRect(0, top, w, panelH);
+    rect.set(0, top, w, panelH);
     canvas.drawRoundRect(rect, dp(12), dp(12), bgPaint);
 
     // 图标直接画在主画布上：View 走硬件加速，Path 由渲染器按像素做抗锯齿，
@@ -264,7 +267,8 @@ public class LyricControlPanel extends View {
     // 重新出现阶梯、以及缩放后的线宽不再落在整像素上而发虚。直接画最清晰。
     drawIcons(canvas, w, h);
 
-    if (settingsVisible) drawSettingsRow(canvas, w);
+    if (settingsVisible || settingsAnim > 0f) drawSettingsRow(canvas, w);
+    canvas.restoreToCount(save);
   }
 
   /** 左上 / 右上角 + 控制行的全部图标 */
@@ -467,8 +471,7 @@ public class LyricControlPanel extends View {
 
   /** 宽度控制条中心 y：和色点行的间距保持一致 */
   private float widthRowCenterY() {
-    return above ? widthRowPx / 2f
-      : lyricHeight + controlRowPx + settingsRowPx + widthRowPx / 2f;
+    return contentTop + lyricHeight + controlRowPx + settingsRowPx + widthRowPx / 2f;
   }
 
   /** 宽度控制条：按下时记录，移动时按比例换算成 10~100 的整数 */
