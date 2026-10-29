@@ -9,7 +9,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.text.SpannableString;
-import android.text.StaticLayout;
 import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.style.ForegroundColorSpan;
@@ -214,34 +213,30 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 上下留白给行高，左右留白避开面板上的图标；视图本身占满窗口宽度，文字才会真正居中
     textView.setPadding(inset, verticalPadding, inset, verticalPadding);
 
-    // 高度直接按「当前文本 + 当前宽度」真排一遍来量。
+    // 高度直接量「真正负责绘制的那个 TextView」：它是唯一和实际渲染完全一致的东西。
     //
-    // 早先是「逻辑行数 × 行高」估算，再用 TextView 上一帧的排版高度兜底；两个问题：
-    //   1. 英文歌词会折行，一句占几个视觉行和 maxLineNum（逻辑行）无关，
-    //      按逻辑行估必然少算，折出来的第三行只露个头顶就被裁掉；
-    //   2. 兜底用的是上一帧的布局，行数调小时又反过来把窗口撑住收不回去。
-    // StaticLayout 用的是同一份 paint / 宽度 / 行距，结果和 TextView 实际排版一致，
-    // 也不依赖布局时机。
-    int availableWidth = layoutParams == null ? 0 : layoutParams.width - inset * 2;
+    // 踩过的两个坑：按「逻辑行数 × 行高」估算会漏掉英文折行；StaticLayout 自算
+    // 又和 TextView 的行距/内边距口径差几像素，表现为最后一行被裁。
+    // 这里直接 measure 当前子 TextView（宽 EXACTLY、高 UNSPECIFIED）。
+    // 注意：子 TextView 被 setHeight 钉过高度，直接 measure 只会拿回那个旧值，
+    // 必须先解绑，量完再放回去（后面 updateHeights 会重新钉）。
+    int availableWidth = layoutParams == null ? 0 : layoutParams.width;
     int height = 0;
-    if (availableWidth > 0) {
-      CharSequence text = buildLyricText();
-      if (text.length() > 0) {
-        StaticLayout layout = StaticLayout.Builder
-          .obtain(text, 0, text.length(), paint, availableWidth)
-          .setIncludePad(false)
-          .setLineSpacing(0f, 1f)
-          .build();
-        height = layout.getHeight();
-      }
+    android.widget.TextView measured = (android.widget.TextView) textView.getCurrentView();
+    if (availableWidth > 0 && measured != null) {
+      int pinned = measured.getHeight();
+      if (pinned > 0) measured.setHeight(-1);
+      measured.measure(
+        android.view.View.MeasureSpec.makeMeasureSpec(availableWidth, android.view.View.MeasureSpec.EXACTLY),
+        android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED));
+      height = measured.getMeasuredHeight();
+      if (pinned > 0) measured.setHeight(pinned);
     }
     if (height <= 0) {
-      // 还没有文本时按行数估个占位高度
       int lines = isSingleLine ? 1 : Math.max(1, Math.min(maxLineNum, Math.max(1, countLyricLines())));
       int fm = paint.getFontMetricsInt(null);
-      height = Math.round(fm * 1.18f) * lines;
+      height = Math.round(fm * 1.18f) * lines + verticalPadding * 2;
     }
-    height += verticalPadding * 2;
     if (height > maxHeight - 100) height = maxHeight - 100;
     if (height < 1) height = 1;
     lyricHeight = height;
@@ -637,9 +632,10 @@ public class LyricView extends Activity implements View.OnTouchListener {
     currentFollowingLyrics = followingLyrics == null ? new ArrayList<>() : followingLyrics;
     if (textView == null) return;
     applySingleLineTextSize();
+    // 高度是直接量当前子 TextView 的，量之前文本必须已经是这一句
     int before = Math.round(lyricHeight);
-    setLayoutParamsHeight();
     textView.setText(buildLyricText());
+    setLayoutParamsHeight();
     // 行数变化（有翻译 / 没翻译）时歌词区高度要跟着调，窗口只向下长，
     // 顶部歌词区起点不动，所以歌词在屏幕上的位置不受影响
     if (Math.round(lyricHeight) != before) updateHeights();
