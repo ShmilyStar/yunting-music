@@ -269,20 +269,15 @@ public class LyricView extends Activity implements View.OnTouchListener {
   }
 
   /**
-   * 按当前「歌词区 + 控制行 + 设置行」重新计算窗口高度，并同步子视图尺寸。
-   * 面板展开时窗口长高，但歌词区的屏幕位置一定不动。
+   * 按「固定歌词带 + 面板行」重算窗口几何，并同步子视图尺寸。
+   *
+   * 窗口高度只跟歌词带（字号 / 单行模式）与屏幕密度有关：开合面板、行数 ±、换行都不改尺寸，
+   * 系统没有可动画的东西。歌词块贴在带底，行数变多时向上长进带顶部那段透明留白里。
    */
   private void updateHeights() {
     if (textView == null || panel == null || layoutParams == null) return;
     setLayoutParamsHeight();
 
-    // 默认排法：顶部是歌词区，下面依次是控制行、设置行、宽度条。
-    // 歌词靠近屏幕底部、下面放不下时整块翻到歌词上方（panelAbove），行序镜像：
-    // 自上而下是宽度条 → 设置行 → 控制行 → 歌词区。
-    // 两种排法都不许动歌词的屏幕位置：一动，面板开合就成了「闪一下」。
-    // 注意这里也不压缩歌词区：压缩会让歌词在展开时跳位，宁可让窗口超出屏幕底部。
-    // 【双窗】窗口高度固定为「歌词区 + 全部面板行」：开合面板不再改尺寸。
-    // 面板收起时主窗整块不可点（见 updateHeights 末尾），由触摸小窗接住歌词带的点击。
     float controlRow = dp(CONTROL_ROW_HEIGHT_DP);
     float settingsRow = dp(SETTINGS_ROW_HEIGHT_DP);
     float widthRow = dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP);
@@ -299,9 +294,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     int contentTop = Math.max(0, Math.round(bandHeight - lyricHeight));
     lyricContentTop = contentTop;
 
-    // 面板永远在歌词下方：位置一旦翻转，窗口就要整体上移，系统会补一段移动动画 = 闪。
-    panelAbove = false;
-    // 这里不再夹取窗口位置：行数 / 字号重排时窗口一移动就会被系统补一段移动动画。
+    // 这里不夹取窗口位置：行数 / 字号重排时窗口一移动就会被系统补一段移动动画。
     // 位置只在拖动和按百分比还原时夹（clampPosition），歌词块顶边可以越过屏幕上沿。
 
     if (layoutParams.width > 0) {
@@ -327,12 +320,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
       textView.setWidth(layoutParams.width);
       textView.setHeight(Math.round(lyricHeight));
       textView.requestLayout();
-      panel.setLyricTop(contentTop);
-      panel.setLyricHeight(lyricHeight);
-      // 面板内部按「歌词区 → 控制行 → 设置行 → 宽度条」的实际像素排布（向上展开时镜像），
+      // 面板内部按「透明留白 → 歌词块 → 控制行 → 设置行 → 宽度条」的实际像素排布，
       // 行高随屏幕密度换算，手机 / 平板都按同一套比例走
-      panel.setLayout(lyricHeight, controlRow, settingsRow, widthRow);
-      panel.setAbove(panelAbove);
+      panel.setLayout(contentTop, lyricHeight, controlRow, settingsRow, widthRow);
       panel.setWidthPercent(Math.round(widthPercentage * 100));
     }
 
@@ -434,8 +424,6 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private int lastAppliedX = Integer.MIN_VALUE;
   private int lastAppliedY = Integer.MIN_VALUE;
 
-  /** 面板排在歌词上方（歌词下面放不下）还是下方 */
-  private boolean panelAbove = false;
   /** 歌词块在窗口内的起点 y：固定歌词带顶部那段透明留白的高度 */
   private int lyricContentTop = 0;
 
@@ -443,8 +431,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (container == null || layoutParams == null || windowManager == null) return;
     updateWH();
     layoutParams.width = (int) (maxWidth * widthPercentage);
-    // 密度变化后 SP 需要重新换算成 px，否则字号会沿用旧屏幕的像素值；
-    // 单行模式下还要按新宽度重新判断是否需要缩小
+    // 密度变化（改 dpi、折叠屏展开、投屏）后 SP 必须重新换算成 px，否则字号会沿用
+    // 旧屏幕的像素值；清掉缓存值强制下发一次
+    appliedTextSize = -1f;
     applySingleLineTextSize();
     updateHeights();
     fixViewPosition();
@@ -479,6 +468,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
     else if (stripTop > maxStripTop) stripTop = maxStripTop;
     layoutParams.y = stripTop - lyricContentTop;
     clampPosition();
+    // 这里会改窗口位置，触摸小窗必须跟着挪，否则换分辨率 / 旋转后点击区会留在旧位置
+    syncTouchLayer();
   }
 
   public void sendPositionEvent(float x, float y) {
@@ -597,8 +588,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     container.addView(textView, new FrameLayout.LayoutParams(
       FrameLayout.LayoutParams.MATCH_PARENT,
       FrameLayout.LayoutParams.MATCH_PARENT));
-    container.setOnTouchListener(this);
-    // 【双窗】透明触摸小窗：只覆盖歌词带，收起面板时由它接点击/拖动
+    // 【双窗】主窗恒定不可点，触摸全部交给下面这层透明小窗
     touchLayer = new View(reactContext);
     touchLayer.setOnTouchListener(this);
     touchParams = new WindowManager.LayoutParams();
@@ -795,8 +785,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
     isSettingsVisible = false;
     panel.setSettingsVisible(false);
     panel.setVisibility(View.VISIBLE);
+    // updateHeights 里已经同步了触摸小窗（展开后要盖住面板行）
     updateHeights();
-    applyTouchFlags();
     scheduleHidePanel();
   }
 
@@ -812,7 +802,6 @@ public class LyricView extends Activity implements View.OnTouchListener {
       panel.setVisibility(View.GONE);
     }
     updateHeights();
-    applyTouchFlags();
   }
 
   private void scheduleHidePanel() {
@@ -929,6 +918,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
     lastAppliedX = layoutParams.x;
     lastAppliedY = layoutParams.y;
     windowManager.updateViewLayout(container, layoutParams);
+    // 触摸小窗要跟着变宽，否则拖宽后新露出来的那段收不到手势
+    syncTouchLayer();
   }
 
   /** 宽度拖动结束：补一次完整重排，让文字按新宽度重新折行 */
