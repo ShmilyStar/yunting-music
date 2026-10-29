@@ -197,6 +197,16 @@ public class LyricView extends Activity implements View.OnTouchListener {
     return true;
   }
 
+  /**
+   * 面板展开时最多要占的高度（控制行 + 设置行 + 宽度条）。
+   *
+   * 拖动 / 落位都按它预留空间：歌词不能被拖到「下面放不下面板」的位置，
+   * 否则展开面板时窗口只能整块往上翻——那是一次窗口移动，系统会补动画，就是闪。
+   */
+  private float panelRowsPx() {
+    return dp(CONTROL_ROW_HEIGHT_DP) + dp(SETTINGS_ROW_HEIGHT_DP) +
+      dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP);
+  }
   private void setLayoutParamsHeight() {
     if (textView == null) return;
     TextPaint paint = textView.getPaint();
@@ -261,7 +271,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
 
     // 纵向只按「歌词区」的高度约束：面板展开只是临时占位，
     // 用整个窗口高度去夹会把歌词推走
-    int maxY = maxHeight - Math.round(lyricHeight);
+    int maxY = maxHeight - Math.round(lyricHeight + panelRowsPx());
     if (maxY < 0) maxY = 0;
     if (layoutParams.y < 0) layoutParams.y = 0;
     else if (layoutParams.y > maxY) layoutParams.y = maxY;
@@ -295,17 +305,15 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 歌词区在屏幕上的位置：展开前记下的位置优先，没记就用当前窗口位置
     int lyricAnchor = isPanelVisible && lyricTopBeforePanel != Integer.MIN_VALUE
       ? lyricTopBeforePanel : layoutParams.y;
-    int lyricMaxY = Math.max(0, maxHeight - Math.round(lyricHeight));
+    int lyricMaxY = Math.max(0, maxHeight - Math.round(lyricHeight + panelRowsPx()));
     if (lyricAnchor < 0) lyricAnchor = 0;
     else if (lyricAnchor > lyricMaxY) lyricAnchor = lyricMaxY;
 
-    // 下面放不下就往上长；两头都放不下时仍按原样往下（超出屏幕的部分看不见），
-    // 总之绝不把歌词推离原位
-    panelAbove = rows > 0 && lyricAnchor + total > maxHeight && lyricAnchor - rows >= 0;
-    lyricContentTop = panelAbove ? Math.round(rows) : 0;
-    // 向上展开时歌词下面是面板，窗口顶边要往前挪 contentTop，歌词才正好落在 lyricAnchor；
-    // 其余情况歌词就在窗口顶部，顶边即歌词位置
-    layoutParams.y = lyricAnchor - lyricContentTop;
+    // 面板永远在歌词下方：位置一旦翻转，窗口就要整体上移，系统会补一段移动动画 = 闪。
+    // 代价是歌词不能拖到贴着屏幕底边（下面要留给面板），拖动与落位都按 panelRowsPx() 预留。
+    panelAbove = false;
+    lyricContentTop = 0;
+    layoutParams.y = lyricAnchor;
 
     if (layoutParams.width > 0) {
       // 歌词视图的高度固定为「歌词区高度」：多行歌词需要足够的绘制区域，
@@ -453,7 +461,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
       layoutParams.y = lyricTopBeforePanel - lyricContentTop;
       return;
     }
-    int maxY = maxHeight - layoutParams.height;
+    int maxY = maxHeight - Math.round(lyricHeight + panelRowsPx());
     int y = (int) (maxHeight * prevViewPercentageY);
     if (y < 0) y = 0;
     else if (y > maxY) y = maxY;
@@ -1006,7 +1014,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
           float tranX = nowX - lastX;
           float tranY = nowY - lastY;
           int maxX = maxWidth - layoutParams.width;
-          int maxY = maxHeight - layoutParams.height;
+          int maxY = maxHeight - Math.round(lyricHeight + panelRowsPx());
           if (maxX < 0) maxX = 0;
           if (maxY < 0) maxY = 0;
           int x = layoutParams.x + (int) tranX;
