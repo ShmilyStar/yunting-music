@@ -240,17 +240,22 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (linePx <= 0) linePx = Math.round(dp(20) * 1.18f);
 
     int reservedLines = isSingleLine ? 1 : Math.max(1, maxLineNum) + 1;
-    // 兼容模式不预留：带高 = 当前歌词块，窗口顶边永远 ≥ 0
-    int bandLines = noNegativeY ? reservedLines : (isSingleLine ? 1 : LyricControlPanel.MAX_LINE + 1);
-    if (bandLines < reservedLines) bandLines = reservedLines;
     int pad = verticalPadding * 2;
 
-    int band = linePx * bandLines + pad;
-    if (maxHeight > 0) {
-      int cap = maxHeight - Math.round(panelRowsPx()) - 100;
-      if (band > cap) band = Math.max(linePx + pad, cap);
-    }
+    // 【固定歌词带】带高只跟屏幕有关：取「整屏 − 面板行 − 100」，
+    // 和字号、行数都无关。这样 A± 改字号、行数 ± 都只在带内挪歌词块，
+    // 窗口尺寸不变 —— 窗口一变尺寸系统就补一段 bounds 动画，看起来就是闪一下。
+    // （此前带高 = 行高 × 9，跟着字号走，所以改字号会 resize。）
     int used = linePx * reservedLines + pad;
+    int band;
+    if (noNegativeY) {
+      // 兼容模式（系统夹负 y）：不预留，带高 = 当前歌词块，窗口顶边永远 ≥ 0
+      band = used;
+    } else if (maxHeight > 0) {
+      band = Math.max(linePx + pad, maxHeight - Math.round(panelRowsPx()) - 100);
+    } else {
+      band = linePx * (isSingleLine ? 1 : LyricControlPanel.MAX_LINE + 1) + pad;
+    }
     // 长句折行后比预留行还高时，歌词块在带内向上长（窗口尺寸不变）
     if (measuredContentHeight > used) used = Math.min(measuredContentHeight, band);
     if (used > band) used = band;
@@ -379,7 +384,16 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (touchLayer.getParent() == null) {
       try { windowManager.addView(touchLayer, touchParams); } catch (Exception ignored) { }
     } else {
-      try { windowManager.updateViewLayout(touchLayer, touchParams); } catch (Exception ignored) { }
+      try {
+        windowManager.updateViewLayout(touchLayer, touchParams);
+      } catch (Exception e) {
+        // 个别 ROM 上触摸小窗的窗口 token 会失效，update 静默失败后它会停在旧尺寸：
+        // 面板收起后小窗还盖着面板那一块，表现就是「原来面板位置点不到下面的图标」。
+        // 失败时直接移除重加，保证尺寸和面板状态一致。
+        Log.e("Lyric", "touch layer update failed, re-adding: " + e.getMessage());
+        try { windowManager.removeView(touchLayer); } catch (Exception ignored) { }
+        try { windowManager.addView(touchLayer, touchParams); } catch (Exception ignored) { }
+      }
     }
   }
 
