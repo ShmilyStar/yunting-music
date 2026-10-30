@@ -187,6 +187,24 @@ public final class LyricSwitchView extends TextSwitcher {
   }
 
   /**
+   * 当前文字块的宽度（最长一行 + 左右内边距）。
+   *
+   * 面板收起时触摸区只盖文字本身，两侧空白点穿到桌面，所以需要真实文字宽度。
+   * 文字在视图里是居中的，调用方用「视图宽 − 文字宽」再除以 2 就能算出入点。
+   */
+  public int getContentWidth() {
+    TextView v = (TextView) this.getCurrentView();
+    if (v == null) return 0;
+    android.text.Layout layout = v.getLayout();
+    if (layout == null) return 0;
+    float max = 0f;
+    for (int i = 0; i < layout.getLineCount(); i++) {
+      max = Math.max(max, layout.getLineWidth(i));
+    }
+    return Math.round(max) + v.getPaddingLeft() + v.getPaddingRight();
+  }
+
+  /**
    * 当前排版出来的行数。
    * 用于避免「上一帧的排版高度」在当前行数上限被调小时继续兜底、把窗口撑住不收。
    */

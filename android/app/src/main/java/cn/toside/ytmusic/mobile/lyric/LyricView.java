@@ -217,8 +217,16 @@ public class LyricView extends Activity implements View.OnTouchListener {
    * 否则展开面板时窗口只能整块往上翻——那是一次窗口移动，系统会补动画，就是闪。
    */
   private float panelRowsPx() {
-    return dp(CONTROL_ROW_HEIGHT_DP) + dp(SETTINGS_ROW_HEIGHT_DP) +
-      dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP);
+    return dp(CONTROL_ROW_HEIGHT_DP) * panelUiScale() + dp(SETTINGS_ROW_HEIGHT_DP) * panelUiScale() +
+      dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP) * panelUiScale();
+  }
+
+  /**
+   * 面板行高的平板系数：平板上面板横向很宽，图标也放大了一档（见 LyricControlPanel#iconScale），
+   * 行高跟着放一点，避免图标贴着行边。手机 / 手机横屏（最小宽度 < 600dp）恒为 1。
+   */
+  private float panelUiScale() {
+    return reactContext.getResources().getConfiguration().smallestScreenWidthDp >= 600 ? 1.3f : 1f;
   }
   private void setLayoutParamsHeight() {
     if (textView == null) return;
@@ -291,9 +299,10 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (textView == null || panel == null || layoutParams == null) return;
     setLayoutParamsHeight();
 
-    float controlRow = dp(CONTROL_ROW_HEIGHT_DP);
-    float settingsRow = dp(SETTINGS_ROW_HEIGHT_DP);
-    float widthRow = dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP);
+    float rowScale = panelUiScale();
+    float controlRow = dp(CONTROL_ROW_HEIGHT_DP) * rowScale;
+    float settingsRow = dp(SETTINGS_ROW_HEIGHT_DP) * rowScale;
+    float widthRow = dp(LyricControlPanel.WIDTH_ROW_HEIGHT_DP) * rowScale;
     float rows = controlRow + settingsRow + widthRow;
 
     // 窗口高度 = 固定歌词带 + 全部面板行：开合面板、行数 ±、换行都不改尺寸。
@@ -370,10 +379,24 @@ public class LyricView extends Activity implements View.OnTouchListener {
    */
   private void syncTouchLayer() {
     if (touchLayer == null || touchParams == null || windowManager == null || layoutParams == null) return;
-    touchParams.width = layoutParams.width;
+    // 面板收起时触摸区只盖住歌词文字本身：平板上窗口比歌词宽得多，
+    // 文字两侧的空白不应该吃掉桌面的点击。面板展开时控件横向铺满，仍用整窗宽。
+    int windowW = layoutParams.width;
+    int layerW = windowW;
+    int layerX = layoutParams.x;
+    if (!isPanelVisible && textView != null && !currentLyric.isEmpty()) {
+      int textW = textView.getContentWidth();
+      if (textW > 0) {
+        int minW = Math.min(windowW, Math.round(dp(96)));
+        layerW = Math.min(windowW, Math.max(minW, textW));
+        layerX = layoutParams.x + (windowW - layerW) / 2;
+      }
+    }
+    // 没有歌词文字（暂停 / 空行）时保持整窗宽：否则屏幕上没有任何可点的入口
+    touchParams.width = layerW;
     touchParams.height = Math.round(lyricHeight) +
       (isPanelVisible ? Math.round(panelRowsPx()) : 0);
-    touchParams.x = layoutParams.x;
+    touchParams.x = layerX;
     touchParams.y = layoutParams.y + lyricContentTop;
     int base = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |

@@ -629,7 +629,17 @@ public class LyricControlPanel extends View {
     float w = getWidth();
     if (w <= 0) return 1f;
     float itemSpacing = w / (float) SETTINGS_ITEMS;
-    return Math.max(0.72f, Math.min(1.12f, itemSpacing / dp(32f)));
+    // 平板（最小宽度 ≥ 600dp）上面板横向很宽，按手机的比例画图标会显得偏小，
+    // 上限单独抬一档；手机上仍是 1.12，横屏手机也不会被误判（判据是最小宽度）。
+    float maxScale = isTablet() ? 1.45f : 1.12f;
+    return Math.max(0.72f, Math.min(maxScale, itemSpacing / dp(32f)));
+  }
+
+  /** 是否平板：用最小宽度判断，手机横屏（最小宽度 < 600dp）不算 */
+  private boolean isTablet() {
+    android.content.Context c = getContext();
+    if (c == null) return false;
+    return c.getResources().getConfiguration().smallestScreenWidthDp >= 600;
   }
 
   /** 角图标的左右边距：贴顶角，随图标一起缩放 */
