@@ -890,7 +890,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
         return;
       }
     }
-    if (contentHeight <= Math.round(lyricHeight)) return;
+    if (Math.abs(contentHeight - measuredContentHeight) <= 1) return;
+    // 内容变矮也要跟着收：长句折行临时多出来的那一行过去后，
+    // 继续按旧的高水位排会空出整整一行（用户 2026-10-31 反馈）
     measuredContentHeight = contentHeight;
     updateHeights();
   }
