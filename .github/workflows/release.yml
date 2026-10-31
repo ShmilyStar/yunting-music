@@ -386,3 +386,55 @@ jobs:
     with:
       version: ${{ needs.CheckVersion.outputs.version }}
     secrets: inherit
+
+  # 发布完成后触发 CNB 同步流水线（用户 2026-10-31 指定的新更新源）：
+  # CNB 构建机从本仓库的 Release 拉 5 个 APK + IPA，发布成 CNB 自己的发行版
+  # （tag vX.Y.Z），并把 version.json 覆盖到 latest 发行版。
+  #
+  # CNB 侧流水线定义在 cnb.cool/shmilystar/yunting-music 的 .cnb.yml（api_trigger 事件），
+  # 这里只负责触发并等待结果；同步失败要让本次发版失败，避免「GitHub 发了、CNB 没有」。
+  NotifyCNB:
+    name: Sync to CNB
+    needs: [CheckVersion, Release]
+    if: needs.Release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger CNB pipeline
+        env:
+          CNB_TOKEN: ${{ secrets.CNB_TOKEN }}
+          VERSION: ${{ needs.CheckVersion.outputs.version }}
+        run: |
+          set -eu
+          if [ -z "${CNB_TOKEN:-}" ]; then
+            echo "::error::CNB_TOKEN secret 未配置，无法同步到 CNB"
+            exit 1
+          fi
+          API=https://api.cnb.cool
+          SLUG=shmilystar/yunting-music
+          AUTH="Authorization: Bearer $CNB_TOKEN"
+          ACC="Accept: application/vnd.cnb.api+json"
+
+          payload=$(jq -nc --arg tag "v$VERSION" \
+            '{branch:"main",event:"api_trigger",env:{RELEASE_TAG:$tag},title:("sync "+$tag)}')
+          resp=$(curl -sS -X POST "$API/$SLUG/-/build/start" -H "$AUTH" -H "$ACC" \
+            -H "Content-Type: application/json" -d "$payload")
+          echo "$resp"
+          sn=$(echo "$resp" | jq -r '.sn // empty')
+          if [ -z "$sn" ]; then
+            echo "::error::CNB 未返回构建号"
+            exit 1
+          fi
+          echo "CNB build: https://cnb.cool/$SLUG/-/build/logs/$sn" >> "$GITHUB_STEP_SUMMARY"
+
+          # 等待同步流水线跑完（最多 30 分钟）；失败直接让本次发版失败
+          for _ in $(seq 1 90); do
+            sleep 20
+            st=$(curl -sS "$API/$SLUG/-/build/status/$sn" -H "$AUTH" -H "$ACC" | jq -r '.status // "?"')
+            echo "cnb status: $st"
+            case "$st" in
+              success) echo "CNB 同步完成" >> "$GITHUB_STEP_SUMMARY"; exit 0 ;;
+              error|failed) echo "::error::CNB 同步失败：https://cnb.cool/$SLUG/-/build/logs/$sn"; exit 1 ;;
+            esac
+          done
+          echo "::error::CNB 同步超时：https://cnb.cool/$SLUG/-/build/logs/$sn"
+          exit 1

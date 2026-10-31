@@ -14,25 +14,28 @@ const abis = [
 ]
 
 /**
- * 版本信息源：Gitee 优先，GitHub 兜底。
+ * 版本信息源：CNB 优先，GitHub 兜底。
  *
- * 用户 2026-10-25 的最终方案：
- *   - Gitee 仓库**只保留 publish/version.json**（代码全部清除），
- *     安装包放在 Gitee 的发行版（Releases）里；
- *   - 由私密仓库 ShmilyStar/MySync 的 Actions 负责把 GitHub 发布同步过去，
- *     并删除 Gitee 上的旧版本发行版，只留最新一个。
+ * 用户 2026-10-31 指定把更新源从 Gitee 换到腾讯 CNB：
+ *   - 版本信息读 CNB 仓库 `latest` 发行版里的 version.json；
+ *   - 安装包放在 CNB 的同版本发行版（`v<version>`）里；
+ *   - GitHub Release 由构建流水线照常发布，作为兜底源保留。
  *
- * 因此 App 侧检测读 Gitee 上那个唯一的 version.json，下载走 Gitee 发行版；
- * 只有 Gitee 不可用（网络 / 仓库被改私有 / 文件缺失）时才回退到 GitHub，
+ * 同步链路：GitHub Actions 构建并发布 Release → 触发 CNB 流水线 →
+ * CNB 从该 Release 拉 5 个 APK + IPA → 传成 CNB 自己的发行版，
+ * 并把 version.json 覆盖到 `latest` 发行版。
+ *
+ * 只有 CNB 不可用（网络 / 附件缺失）时才回退到 GitHub，
  * 避免国内用户上线就先白等一次超时。
  */
 const REPO_OWNER = 'ShmilyStar'
 const REPO_NAME = 'yunting-music'
-const GITEE_RAW_BASE = `https://gitee.com/${REPO_OWNER}/${REPO_NAME}/raw/main`
+const CNB_SLUG = 'shmilystar/yunting-music'
+const CNB_ASSET_BASE = `https://cnb.cool/${CNB_SLUG}/-/releases/download`
 const GITHUB_RAW_BASE = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main`
 
 const address = [
-  [`${GITEE_RAW_BASE}/publish/version.json`, 'gitee'],
+  [`${CNB_ASSET_BASE}/latest/version.json`, 'cnb'],
   [`${GITHUB_RAW_BASE}/publish/version.json`, 'github'],
 ]
 
@@ -141,13 +144,13 @@ let apkSavePath
  * 注意「自动调起安装器」和「自动安装」是两回事：安装器的最后一步
  * （是否安装 / 授权未知来源）始终由用户在系统界面里手动确认，App 无法代劳。
  */
-/** GitHub Release 里同名资源的下载地址，作为 Gitee 失败时的兜底 */
+/** GitHub Release 里同名资源的下载地址，作为 CNB 失败时的兜底 */
 const githubApkUrl = (version, abi) =>
   `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${REPO_NAME}-v${version}-${abi}.apk`
 
-/** Gitee 发行版里同名资源的下载地址（用户 2026-10-25 指定改到 Gitee） */
-const giteeApkUrl = (version, abi) =>
-  `https://gitee.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${REPO_NAME}-v${version}-${abi}.apk`
+/** CNB 发行版里同名资源的下载地址（用户 2026-10-31 指定改到 CNB） */
+const cnbApkUrl = (version, abi) =>
+  `${CNB_ASSET_BASE}/v${version}/${REPO_NAME}-v${version}-${abi}.apk`
 
 /**
  * 下载新版本 APK，**下载完成后自动调起系统安装界面**（用户 2026-10-21 指定）。
@@ -157,7 +160,7 @@ const giteeApkUrl = (version, abi) =>
  *   用户点「是」→ 后台自动下载 → 下载完成直接拉起系统安装器 →
  *   由用户手动点「安装」。
  *
- * 下载源：Gitee 发行版优先，GitHub Release 兜底。两个仓库由 Actions
+ * 下载源：CNB 发行版优先，GitHub Release 兜底。两个发行版由流水线
  * 自动同步，同一版本两边都有同名的 APK 附件，任一可用即可完成更新。
  *
  * 注意「自动调起安装器」和「自动安装」是两回事：安装器的最后一步
@@ -173,12 +176,12 @@ export const downloadNewVersion = async(version, onDownload = noop) => {
    */
   if (Platform.OS === 'ios') {
     const file = `${REPO_NAME}-v${version}-unsigned.ipa`
-    const ipaUrl = `https://gitee.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${file}`
+    const ipaUrl = `${CNB_ASSET_BASE}/v${version}/${file}`
     const fallback = `https://github.com/${REPO_OWNER}/${REPO_NAME}/releases/download/v${version}/${file}`
     try {
       await Linking.openURL(ipaUrl)
     } catch (e) {
-      // Gitee 没传 IPA 时退回 GitHub 的同名附件
+      // CNB 没传 IPA 时退回 GitHub 的同名附件
       await Linking.openURL(fallback)
     }
     return
@@ -205,8 +208,8 @@ export const downloadNewVersion = async(version, onDownload = noop) => {
       // 先下到 .part，校验通过后再改名为正式文件：
       // 安装器永远拿不到一个可能还没写完 / 被写坏的文件
       const partPath = `${savePath}.part`
-      // 同一 ABI 先试 Gitee，再试 GitHub
-      for (const buildUrl of [giteeApkUrl, githubApkUrl]) {
+      // 同一 ABI 先试 CNB，再试 GitHub
+      for (const buildUrl of [cnbApkUrl, githubApkUrl]) {
         const url = buildUrl(version, abi)
         // 同一个源失败后再试一次：手机网络抖动 / 服务端提前断开很常见
         for (let attempt = 0; attempt < 2; attempt++) {
