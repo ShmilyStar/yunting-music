@@ -720,7 +720,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
     textView.setAlpha(alpha);
     textView.setTextSize(textSize);
     appliedTextSize = textSize;
-    textView.setGravity(Gravity.CENTER);
+    // 多行模式底部对齐：歌词块按「最大行数」预留，实际行数更少时（没翻译 / 没有下一句）
+    // 文字要贴着块底（也贴着控制行），不能垂直居中在块里再空出一截
+    textView.setGravity(isSingleLine ? Gravity.CENTER : (Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
     if (!isSingleLine) textView.setMaxLines(maxLineNum);
 
     panel = new LyricControlPanel(reactContext);

@@ -6,6 +6,24 @@ Project versioning adheres to [Semantic Versioning](http://semver.org/).
 Commit convention is based on [Conventional Commits](http://conventionalcommits.org).
 Change log format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+## [1.1.1](https://github.com/ShmilyStar/yunting-music/compare/v1.0.8...v1.1.1) - 2026-10-31
+
+本版本收口桌面歌词的两个细节，并把更新源换到腾讯 CNB（国内下载更快）。
+
+修复
+- 换句时面板会「弹一下」：歌词块高度每句都在估算值和实测值之间来回跳一次，歌词贴底、面板翻到上方时最明显；现在实测行高只增不减，换句不再重排
+- 歌词下方留白偏大：歌词块按最大行数预留，实际行数更少时文字垂直居中、下方空出一截；改为底部对齐，文字始终贴着控制行
+- 字号 / 行数 / 宽度 / 屏幕密度变化后，歌词块高度改为一次性重测，不再每句反复校正
+
+调整
+- 控制行、设置行、宽度条整体向歌词一侧收进 4dp，歌词到播放 / 上一曲 / 下一曲更紧凑
+- 更新检测与安装包下载改走 CNB（cnb.cool），国内下载速度明显更快；CNB 不可用时自动回退 GitHub
+- 平板（最小宽度 ≥ 600dp）保持 1.1.0 的图标与行高放大策略
+
+注意
+- Android 安装包按 ABI 提供，绝大多数设备选 arm64-v8a
+- 从 1.1.0 及更早版本可直接覆盖安装
+
 ## [1.0.8](https://github.com/ShmilyStar/yunting-music/compare/v1.0.7...v1.0.8) - 2026-10-28
 
 本版本修复「更新到 1.0.7 后仍然反复提示有新版本」的问题。
