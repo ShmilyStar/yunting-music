@@ -251,7 +251,6 @@ jobs:
             echo '(no artifacts)' >> ../publish/changeLog.md
           fi
           echo -e '```\n' >> ../publish/changeLog.md
-          echo -e '\n本仓库签名与上游不同，从上游版本覆盖安装需先卸载。\n' >> ../publish/changeLog.md
 
       - name: Get package version
         run: |
