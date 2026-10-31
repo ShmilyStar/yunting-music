@@ -6,6 +6,18 @@ Project versioning adheres to [Semantic Versioning](http://semver.org/).
 Commit convention is based on [Conventional Commits](http://conventionalcommits.org).
 Change log format is based on [Keep a Changelog](http://keepachangelog.com/).
 
+## [1.1.2](https://github.com/ShmilyStar/yunting-music/compare/v1.1.1...v1.1.2) - 2026-10-31
+
+本版本修好桌面歌词的两个显示问题。
+
+修复
+- 长句折行过去后歌词块不收回：折行的长句会临时多占一行，换回两行歌词时仍然留着整行空白；现在内容变矮时块高同步收回，同时保留行高缓存只增不减，普通换句不再抖动
+- 面板翻到歌词上方时，歌词到播放 / 暂停按钮的距离比翻到下方时大：朝上原来贴的是歌词块的顶边（预留但没用到的那块空间），现在改为贴文字的实际顶边，面板行、面板底色和触摸区一起跟着走
+
+注意
+- Android 安装包按 ABI 提供，绝大多数设备选 arm64-v8a
+- 从 1.0.9 及以上可直接覆盖安装
+
 ## [1.1.1](https://github.com/ShmilyStar/yunting-music/compare/v1.0.8...v1.1.1) - 2026-10-31
 
 本版本收口桌面歌词的两个细节，并把更新源换到腾讯 CNB（国内下载更快）。
