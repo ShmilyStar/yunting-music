@@ -216,100 +216,6 @@ jobs:
           name: app-v${{ env.PACKAGE_VERSION }}-unsigned-ipa
           path: ios/build/Build/Products/Release-iphoneos/yunting-music-v${{ env.PACKAGE_VERSION }}-unsigned.ipa
 
-  # Android_SL:
-  #   name: Android_SL
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Check out git repository
-  #       uses: actions/checkout@v7
-  #       with:
-  #         ref: statusbar_lyric
-
-  #     - name: Setup Env
-  #       uses: ./.github/actions/setup
-
-  #     - name: Build Packages
-  #       shell: bash
-  #       run: |
-  #         cd android
-  #         echo ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }} | base64 --decode > app/${{ secrets.KEYSTORE_STORE_FILE }}
-  #         ./gradlew assembleRelease -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
-  #         rm -f app/${{ secrets.KEYSTORE_STORE_FILE }}
-
-  #     # Push tag to GitHub if package.json version's tag is not tagged
-  #     - name: Get package version
-  #       run: |
-  #         node -p -e '`PACKAGE_VERSION=${require("./package.json").version}`' >> $GITHUB_ENV
-  #         echo "COMMIT_SHA=$(git show -s --format=%H)" >> $GITHUB_ENV
-
-  #     - name: Create git tag
-  #       uses: pkgdeps/git-tag-action@v3
-  #       with:
-  #         github_token: ${{ secrets.GITHUB_TOKEN }}
-  #         github_repo: ${{ github.repository }}
-  #         version: ${{ env.PACKAGE_VERSION }}
-  #         git_commit_sha: ${{ env.COMMIT_SHA }}
-  #         git_tag_prefix: "v"
-
-  #     - name: Generate file MD5
-  #       run: |
-  #         echo "current commit sha: ${{ env.COMMIT_SHA }}"
-  #         cd android/app/build/outputs/apk/release
-  #         md5sum *.apk
-
-  #     - name: Upload Artifact
-  #       uses: ./.github/actions/upload-artifact
-  #       env:
-  #         PACKAGE_TYPE: 'Android_SL'
-  #         PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
-
-  # Android_5:
-  #   name: Android_5
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Check out git repository
-  #       uses: actions/checkout@v7
-  #       with:
-  #         ref: android_5
-
-  #     - name: Setup Env
-  #       uses: ./.github/actions/setup
-
-  #     - name: Build Packages
-  #       shell: bash
-  #       run: |
-  #         cd android
-  #         echo ${{ secrets.KEYSTORE_STORE_FILE_BASE64 }} | base64 --decode > app/${{ secrets.KEYSTORE_STORE_FILE }}
-  #         ./gradlew assembleRelease -PMYAPP_UPLOAD_STORE_FILE='${{ secrets.KEYSTORE_STORE_FILE }}' -PMYAPP_UPLOAD_KEY_ALIAS='${{ secrets.KEYSTORE_KEY_ALIAS }}' -PMYAPP_UPLOAD_STORE_PASSWORD='${{ secrets.KEYSTORE_PASSWORD }}' -PMYAPP_UPLOAD_KEY_PASSWORD='${{ secrets.KEYSTORE_KEY_PASSWORD }}'
-  #         rm -f app/${{ secrets.KEYSTORE_STORE_FILE }}
-
-  #     # Push tag to GitHub if package.json version's tag is not tagged
-  #     - name: Get package version
-  #       run: |
-  #         node -p -e '`PACKAGE_VERSION=${require("./package.json").version}`' >> $GITHUB_ENV
-  #         echo "COMMIT_SHA=$(git show -s --format=%H)" >> $GITHUB_ENV
-
-  #     - name: Create git tag
-  #       uses: pkgdeps/git-tag-action@v3
-  #       with:
-  #         github_token: ${{ secrets.GITHUB_TOKEN }}
-  #         github_repo: ${{ github.repository }}
-  #         version: ${{ env.PACKAGE_VERSION }}
-  #         git_commit_sha: ${{ env.COMMIT_SHA }}
-  #         git_tag_prefix: "v"
-
-  #     - name: Generate file MD5
-  #       run: |
-  #         echo "current commit sha: ${{ env.COMMIT_SHA }}"
-  #         cd android/app/build/outputs/apk/release
-  #         md5sum *.apk
-
-  #     - name: Upload Artifact
-  #       uses: ./.github/actions/upload-artifact
-  #       env:
-  #         PACKAGE_TYPE: 'Android_5'
-  #         PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
-
   Release:
     name: Release
     runs-on: ubuntu-latest
@@ -367,25 +273,6 @@ jobs:
             artifacts/*.ipa
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # 发布完成后主动通知 MySync 把这一版同步到 Gitee。
-  #
-  # 不能靠 MySync 的 on: release 来触发：用 GITHUB_TOKEN 创建的 Release
-  # 不会触发其它工作流（GitHub 的防递归机制），所以必须在这里直接调。
-  #
-  # Gitee 上的顺序由 MySync 保证：先传齐安装包 → 再删旧版本 → 最后改 version.json。
-  # 注意：notify-mysync.yml 是 workflow_call 工作流，不是 action。
-  # 早先写成在 steps 里 `uses: ./.github/workflows/notify-mysync.yml`（本地 action 语法），
-  # GitHub 会去找 action.yml，必然报 Can't find 'action.yml' ...，导致每次发版同步 Gitee 都失败。
-  # 可复用工作流必须在 job 级别 uses，并用 secrets: inherit 把 MYSYNC 传进去。
-  NotifyGitee:
-    name: Sync to Gitee
-    needs: [CheckVersion, Release]
-    if: needs.Release.result == 'success'
-    uses: ./.github/workflows/notify-mysync.yml
-    with:
-      version: ${{ needs.CheckVersion.outputs.version }}
-    secrets: inherit
 
   # 发布完成后触发 CNB 同步流水线（用户 2026-10-31 指定的新更新源）：
   # CNB 构建机从本仓库的 Release 拉 5 个 APK + IPA，发布成 CNB 自己的发行版
