@@ -98,6 +98,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private int measuredContentHeight = 0;
   /** 实测每行像素（中文字体比主字体高），只增不减，换字号时重测 */
   private int measuredLinePx = 0;
+  /** 歌词文字实际占据的顶边（窗口内坐标）：块按最大行数预留、文字底部对齐，行数少时块上方是空的 */
+  private int lyricVisualTop = 0;
   /**
    * 兼容模式：个别 ROM 会把负的窗口 y 夹到 0（不给悬浮窗越出屏幕上沿）。
    * 那时「带顶留白」会让歌词整体下移，歌词也贴不到顶。
@@ -367,6 +369,11 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 行数变多时歌词块向上长，面板和窗口都不动。
     int contentTop = Math.max(0, Math.round(bandHeight - lyricHeight));
     lyricContentTop = contentTop;
+    // 文字底部对齐：实际内容比块矮时，块上方是空的。面板朝上要贴文字顶，不能贴块顶
+    lyricVisualTop = contentTop;
+    if (measuredContentHeight > 0 && measuredContentHeight < lyricHeight) {
+      lyricVisualTop = contentTop + Math.round(lyricHeight) - measuredContentHeight;
+    }
 
     // 这里不夹取窗口位置：行数 / 字号重排时窗口一移动就会被系统补一段移动动画。
     // 位置只在拖动和按百分比还原时夹（clampPosition），歌词块顶边可以越过屏幕上沿。
@@ -398,6 +405,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
       // 行高随屏幕密度换算，手机 / 平板都按同一套比例走
       panel.setLayout(contentTop, lyricHeight, controlRow, settingsRow, widthRow);
       panel.setRowGap(panelRowGapPx());
+      panel.setVisualTop(lyricVisualTop);
       panel.setWidthPercent(Math.round(widthPercentage * 100));
       // 歌词贴近屏幕底部、下面放不下整块面板时，面板改画到歌词上方（窗口不移动）
       updatePanelSide();
@@ -454,7 +462,11 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (isPanelVisible) {
       // 面板行整体向歌词一侧收进了 after，触摸区也跟着收，免得下面多出一截挡桌面
       layerH += Math.round(panelRowsPx()) - after;
-      if (panelAbove) layerTop -= Math.round(panelRowsPx()) - after;
+      if (panelAbove) {
+        // 朝上时行贴着「文字顶」排，触摸区也从文字顶往上算（块上方可能是空的）
+        layerTop = layoutParams.y + lyricVisualTop - (Math.round(panelRowsPx()) - after);
+        layerH = Math.round(panelRowsPx()) - after + (lyricContentTop + Math.round(lyricHeight) - lyricVisualTop);
+      }
     }
     touchParams.width = layerW;
     touchParams.height = layerH;

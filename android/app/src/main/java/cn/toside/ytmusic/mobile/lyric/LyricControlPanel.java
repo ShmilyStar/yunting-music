@@ -90,6 +90,8 @@ public class LyricControlPanel extends View {
   private ActionListener listener;
 
   private float lyricHeight = 0f;
+  /** 歌词文字实际占据的顶边（由 LyricView 每次重排后下发） */
+  private float visualTop = 0f;
   /** 歌词块在窗口内的起点：窗口上方是预留的透明留白，面板底色不能画到那里 */
   private float contentTop = 0f;
   /** 控制行 / 设置行 / 宽度条的实际像素高度，由 LyricView 下发 */
@@ -191,7 +193,7 @@ public class LyricControlPanel extends View {
   /** 面板底色当前实际画到的上边界（设置行展开时向上/向下逐步露出） */
   private float panelDrawTop() {
     if (!above) return contentTop;
-    return contentTop - controlRowPx - (settingsRowPx + widthRowPx) * settingsAnim + rowGapPx;
+    return visualTopPx() - controlRowPx - (settingsRowPx + widthRowPx) * settingsAnim + rowGapPx;
   }
 
   /** 面板底色当前实际画到的下边界 */
@@ -208,15 +210,32 @@ public class LyricControlPanel extends View {
     return contentTop;
   }
 
+  /**
+   * 歌词文字实际占据的顶边（窗口内坐标）。
+   *
+   * 歌词块按最大行数预留、文字底部对齐：实际行数更少时，块上方是空的。
+   * 面板朝上时如果贴着块顶排，就会凭空多出一行的距离，所以一律贴文字顶。
+   */
+  public void setVisualTop(float visualTopPx) {
+    if (visualTopPx == visualTop) return;
+    visualTop = visualTopPx;
+    invalidate();
+  }
+
+  /** 文字实际顶边；未测出内容时退回块顶 */
+  private float visualTopPx() {
+    return visualTop > 0f ? visualTop : contentTop;
+  }
+
   /** 控制行中心 y：紧接在歌词块下方（向上弹出时紧贴歌词块上方） */
   private float controlCenterY() {
-    return above ? contentTop - controlRowPx / 2f + rowGapPx
+    return above ? visualTopPx() - controlRowPx / 2f + rowGapPx
       : contentTop + lyricHeight + controlRowPx / 2f - rowGapPx;
   }
 
   /** 色点行中心 y（向上弹出时依次向上排） */
   private float settingsCenterY() {
-    return above ? contentTop - controlRowPx - settingsRowPx / 2f + rowGapPx
+    return above ? visualTopPx() - controlRowPx - settingsRowPx / 2f + rowGapPx
       : contentTop + lyricHeight + controlRowPx + settingsRowPx / 2f - rowGapPx;
   }
 
@@ -505,7 +524,7 @@ public class LyricControlPanel extends View {
 
   /** 宽度控制条中心 y：和色点行的间距保持一致 */
   private float widthRowCenterY() {
-    return above ? contentTop - controlRowPx - settingsRowPx - widthRowPx / 2f + rowGapPx
+    return above ? visualTopPx() - controlRowPx - settingsRowPx - widthRowPx / 2f + rowGapPx
       : contentTop + lyricHeight + controlRowPx + settingsRowPx + widthRowPx / 2f - rowGapPx;
   }
 
