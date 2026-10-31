@@ -76,6 +76,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private boolean isShowToggleAnima = false;
   private boolean isPanelVisible = false;
   private boolean isSettingsVisible = false;
+  /** 面板画在歌词上方（歌词贴近屏幕底部时向上弹出，窗口本身不动） */
+  private boolean panelAbove = false;
   private boolean isPlaying = false;
   private String unplayColor = "rgba(255, 255, 255, 1)";
   private String playedColor = "rgba(44, 183, 233, 1)";
@@ -247,7 +249,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
     int linePx = Math.round(paint.getFontMetricsInt(null) * 1.18f * sizeRatio);
     if (linePx <= 0) linePx = Math.round(dp(20) * 1.18f);
 
-    int reservedLines = isSingleLine ? 1 : Math.max(1, maxLineNum) + 1;
+    // 歌词块只按实际显示行数预留：原来多留一行，普通两行歌词会在控制行上方空出半行
+    int reservedLines = isSingleLine ? 1 : Math.max(1, maxLineNum);
     int pad = verticalPadding * 2;
 
     // 【固定歌词带】带高只跟屏幕有关：取「整屏 − 面板行 − 100」，
@@ -260,7 +263,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
       // 兼容模式（系统夹负 y）：不预留，带高 = 当前歌词块，窗口顶边永远 ≥ 0
       band = used;
     } else if (maxHeight > 0) {
-      band = Math.max(linePx + pad, maxHeight - Math.round(panelRowsPx()) - 100);
+      // 带高直接取整屏：与字号、行数都无关，改字号不会 resize；
+      // 同时保证歌词块上方永远放得下整块面板，面板可以在歌词贴近屏幕底部时向上弹出
+      band = maxHeight;
     } else {
       band = linePx * (isSingleLine ? 1 : LyricControlPanel.MAX_LINE + 1) + pad;
     }
@@ -273,6 +278,40 @@ public class LyricView extends Activity implements View.OnTouchListener {
     lyricHeight = used;
   }
 
+  /**
+   * 窗口 y 的上限：歌词块底边贴着屏幕底。
+   * 普通模式下不再为面板预留空间（放不下时面板向上弹），兼容模式（夹负 y）仍要预留。
+   */
+  private int maxWindowY() {
+    if (maxHeight <= 0) return 0;
+    int maxY;
+    if (noNegativeY) maxY = maxHeight - Math.round(bandHeight) - Math.round(panelRowsPx());
+    else maxY = maxHeight - Math.round(bandHeight);
+    int minY = -Math.round(bandHeight - lyricHeight);
+    if (maxY < minY) maxY = minY;
+    return maxY;
+  }
+
+  /** 根据歌词块位置决定面板朝下还是朝上，只影响绘制与命中，不动窗口几何 */
+  private void updatePanelSide() {
+    if (panel == null || layoutParams == null) return;
+    boolean above = shouldPanelGoAbove();
+    if (above == panelAbove) return;
+    panelAbove = above;
+    panel.setAbove(above);
+    panel.invalidate();
+  }
+
+  private boolean shouldPanelGoAbove() {
+    if (!isPanelVisible || maxHeight <= 0) return false;
+    int rows = Math.round(panelRowsPx());
+    int stripTop = layoutParams.y + lyricContentTop;
+    int stripBottom = stripTop + Math.round(lyricHeight);
+    if (stripBottom + rows <= maxHeight) return false;
+    // 上面也放不下时保持朝下，避免面板跑到屏幕外
+    return stripTop - rows >= 0;
+  }
+
   private void clampPosition() {
     if (layoutParams == null) return;
     int maxX = maxWidth - layoutParams.width;
@@ -280,10 +319,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     if (layoutParams.x < 0) layoutParams.x = 0;
     else if (layoutParams.x > maxX) layoutParams.x = maxX;
 
-    // 窗口高度恒为「歌词带 + 面板行」，整窗都要留在屏幕里；窗口顶边可以越过屏幕上沿，
-    // 因为歌词块贴在带的底部，带上面那段空白是透明的、看不见
-    int maxY = maxHeight - Math.round(bandHeight + panelRowsPx());
-    if (maxY < 0) maxY = 0;
+    int maxY = maxWindowY();
     int minY = -Math.round(bandHeight - lyricHeight);
     if (layoutParams.y < minY) layoutParams.y = minY;
     else if (layoutParams.y > maxY) layoutParams.y = maxY;
@@ -346,6 +382,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
       // 行高随屏幕密度换算，手机 / 平板都按同一套比例走
       panel.setLayout(contentTop, lyricHeight, controlRow, settingsRow, widthRow);
       panel.setWidthPercent(Math.round(widthPercentage * 100));
+      // 歌词贴近屏幕底部、下面放不下整块面板时，面板改画到歌词上方（窗口不移动）
+      updatePanelSide();
     }
 
     // 只在尺寸真的变了才提交：同样的宽高反复 updateViewLayout 会让悬浮窗闪烁
@@ -393,11 +431,16 @@ public class LyricView extends Activity implements View.OnTouchListener {
       }
     }
     // 没有歌词文字（暂停 / 空行）时保持整窗宽：否则屏幕上没有任何可点的入口
+    int layerTop = layoutParams.y + lyricContentTop;
+    int layerH = Math.round(lyricHeight);
+    if (isPanelVisible) {
+      layerH += Math.round(panelRowsPx());
+      if (panelAbove) layerTop -= Math.round(panelRowsPx());
+    }
     touchParams.width = layerW;
-    touchParams.height = Math.round(lyricHeight) +
-      (isPanelVisible ? Math.round(panelRowsPx()) : 0);
+    touchParams.height = layerH;
     touchParams.x = layerX;
-    touchParams.y = layoutParams.y + lyricContentTop;
+    touchParams.y = layerTop;
     int base = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
       WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
@@ -544,12 +587,15 @@ public class LyricView extends Activity implements View.OnTouchListener {
 
     // 百分比记的是「歌词块顶边」的屏幕位置；窗口顶边在它上面 contentTop 处，
     // 所以这里先按百分比还原歌词块顶边，再倒推窗口位置
-    int maxStripTop = Math.max(0, maxHeight - Math.round(lyricHeight + panelRowsPx()));
+    int maxStripTop = noNegativeY
+      ? Math.max(0, maxHeight - Math.round(lyricHeight + panelRowsPx()))
+      : Math.max(0, maxHeight - Math.round(lyricHeight));
     int stripTop = Math.round(maxHeight * prevViewPercentageY);
     if (stripTop < 0) stripTop = 0;
     else if (stripTop > maxStripTop) stripTop = maxStripTop;
     layoutParams.y = stripTop - lyricContentTop;
     clampPosition();
+    updatePanelSide();
     // 这里会改窗口位置，触摸小窗必须跟着挪，否则换分辨率 / 旋转后点击区会留在旧位置
     syncTouchLayer();
   }
@@ -1098,9 +1144,9 @@ public class LyricView extends Activity implements View.OnTouchListener {
           float tranX = nowX - lastX;
           float tranY = nowY - lastY;
           int maxX = maxWidth - layoutParams.width;
-          // 整窗（带 + 面板行）要留在屏幕内；窗口顶边允许越过屏幕上沿，
-          // 带顶部那段留白是透明的，看不见
-          int maxY = maxHeight - Math.round(bandHeight + panelRowsPx());
+          // 歌词块可以一直拖到屏幕底部（面板放不下时会弹到歌词上方）；
+          // 兼容模式下仍按「歌词 + 面板行」预留
+          int maxY = maxWindowY();
           int minY = -lyricContentTop;
           if (maxX < 0) maxX = 0;
           if (maxY < 0) maxY = 0;
@@ -1113,6 +1159,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
           layoutParams.x = x;
           layoutParams.y = y;
           windowManager.updateViewLayout(container, layoutParams);
+          // 拖动跨过「下面放不下」的界线时，面板要实时翻到上方 / 翻回下方
+          updatePanelSide();
           // 触摸小窗要跟着走，否则拖动后点击区域会留在原地
           syncTouchLayer();
         }
