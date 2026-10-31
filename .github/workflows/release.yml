@@ -241,6 +241,7 @@ jobs:
       - name: Generate file MD5
         run: |
           echo -e '\n### File MD5\n```' >> ./publish/changeLog.md
+          # 发布说明只写本版本内容：不要追加「签名与上游不同」之类的固定提示（用户 2026-10-31 指定）
           cd artifacts
           # 只对真实存在的产物做校验（某个平台构建失败时不会有对应文件）
           shopt -s nullglob
