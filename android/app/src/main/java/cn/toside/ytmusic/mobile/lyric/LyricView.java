@@ -94,8 +94,10 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private float lyricHeight = 0;
   /** 固定歌词带高度：按「最大可设行数 + 1 行」预留，行数 ± 与换行都不改窗口尺寸 */
   private float bandHeight = 0;
-  /** 当前文本真实排版高度（超过预留行数时用，比如长句折行），换句时清零 */
+  /** 当前文本真实排版高度（超过预留行数时用，比如长句折行），按「高水位」保留 */
   private int measuredContentHeight = 0;
+  /** 实测每行像素（中文字体比主字体高），只增不减，换字号时重测 */
+  private int measuredLinePx = 0;
   /**
    * 兼容模式：个别 ROM 会把负的窗口 y 夹到 0（不给悬浮窗越出屏幕上沿）。
    * 那时「带顶留白」会让歌词整体下移，歌词也贴不到顶。
@@ -246,7 +248,10 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 行高一律按基准字号算：单行模式会把字号临时缩小，跟着缩小的话每句歌词都会
     // 改一次带宽，等于每句都闪。
     float sizeRatio = appliedTextSize > 0 ? textSize / appliedTextSize : 1f;
-    int linePx = Math.round(paint.getFontMetricsInt(null) * 1.18f * sizeRatio);
+    int estimate = Math.round(paint.getFontMetricsInt(null) * 1.18f * sizeRatio);
+    // 实测过的行高优先：估算值按主字体算，中文会走更高的后备字体，
+    // 差出来的那几像素会让块高在「估算 ↔ 实测」之间来回跳
+    int linePx = !isSingleLine && measuredLinePx > estimate ? measuredLinePx : estimate;
     if (linePx <= 0) linePx = Math.round(dp(20) * 1.18f);
 
     // 歌词块只按实际显示行数预留：原来多留一行，普通两行歌词会在控制行上方空出半行
@@ -558,11 +563,15 @@ public class LyricView extends Activity implements View.OnTouchListener {
     // 密度变化（改 dpi、折叠屏展开、投屏）后 SP 必须重新换算成 px，否则字号会沿用
     // 旧屏幕的像素值；清掉缓存值强制下发一次
     appliedTextSize = -1f;
+    // 行高 / 块高都是按 px 实测的，密度一变全部作废，重排后再测一次
+    measuredLinePx = 0;
+    measuredContentHeight = 0;
     applySingleLineTextSize();
     updateHeights();
     fixViewPosition();
     windowManager.updateViewLayout(container, layoutParams);
     probeNegativeY();
+    if (textView != null) textView.post(this::fitLyricHeightToContent);
   }
 
   /**
@@ -688,6 +697,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
 
   private void createViews() {
     appliedTextSize = -1f;
+    measuredContentHeight = 0;
+    measuredLinePx = 0;
     textView = new LyricSwitchView(reactContext, isSingleLine, isShowToggleAnima);
     textView.setText("");
     textView.setTextColor(isSingleLine ? playedColorInt : unplayColorInt);
@@ -771,6 +782,8 @@ public class LyricView extends Activity implements View.OnTouchListener {
     }
 
     windowManager.addView(container, layoutParams);
+    // 首屏排版完成后按实测行高校正一次，后面每句歌词都直接用这份实测值
+    textView.post(this::fitLyricHeightToContent);
   }
 
   public void setLyric(String text, ArrayList<String> extendedLyrics, ArrayList<String> followingLyrics) {
@@ -781,7 +794,6 @@ public class LyricView extends Activity implements View.OnTouchListener {
     applySingleLineTextSize();
     // 高度是直接量当前子 TextView 的，量之前文本必须已经是这一句
     int before = Math.round(lyricHeight);
-    measuredContentHeight = 0;
     textView.setText(buildLyricText());
     setLayoutParamsHeight();
     // 行数变化（有翻译 / 没翻译）时歌词区高度要跟着调，窗口只向下长，
@@ -842,11 +854,26 @@ public class LyricView extends Activity implements View.OnTouchListener {
     textView.setTextSize(sp);
   }
 
-  /** 按歌词视图真实排版高度校正歌词块高度（只增不减，且不超过固定带的容量） */
+  /**
+   * 按歌词视图真实排版高度校正歌词块高度（只增不减，且不超过固定带的容量）。
+   *
+   * 这里记的是「高水位」：同一套字号 / 行数 / 宽度下，块高一旦按实测撑开就不再回落。
+   * 换句时如果重新按估算值缩小、下一帧再按实测撑开，块高每句抖一次，
+   * 面板（尤其是歌词贴底、面板翻到上方时）就会跟着弹一下。
+   */
   private void fitLyricHeightToContent() {
     if (textView == null || layoutParams == null) return;
     int contentHeight = Math.round(textView.getContentHeight());
     if (contentHeight <= 0) return;
+    if (!isSingleLine) {
+      int linePx = textView.getLinePx();
+      if (linePx > measuredLinePx) {
+        measuredLinePx = linePx;
+        measuredContentHeight = 0;
+        updateHeights();
+        return;
+      }
+    }
     if (contentHeight <= Math.round(lyricHeight)) return;
     measuredContentHeight = contentHeight;
     updateHeights();
@@ -1053,7 +1080,10 @@ public class LyricView extends Activity implements View.OnTouchListener {
   /** 宽度拖动结束：补一次完整重排，让文字按新宽度重新折行 */
   private void onWidthSettled() {
     if (textView == null || layoutParams == null || container == null) return;
+    // 宽度变了，折行结果跟着变：重新按实测高度算一次块高
+    measuredContentHeight = 0;
     updateHeights();
+    textView.post(this::fitLyricHeightToContent);
   }
 
   private void changeTextSize(int delta) {
@@ -1259,6 +1289,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
     fixViewPosition();
     windowManager.addView(container, layoutParams);
     textView.setText(buildLyricText());
+    textView.post(this::fitLyricHeightToContent);
   }
 
   public void setShowToggleAnima(boolean isShowToggleAnima) {
@@ -1270,8 +1301,12 @@ public class LyricView extends Activity implements View.OnTouchListener {
   public void setTextSize(float textSize) {
     this.textSize = textSize;
     if (textView == null) return;
+    // 字号变了，之前实测的块高 / 行高作废：先按估算排一版，排版完成后按新字号重新实测
+    measuredContentHeight = 0;
+    measuredLinePx = 0;
     applySingleLineTextSize();
     updateHeights();
+    textView.post(this::fitLyricHeightToContent);
   }
 
   /** 设置页改了行数：和面板上的「行数 ±」走同一条重排路径 */

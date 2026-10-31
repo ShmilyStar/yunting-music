@@ -187,6 +187,18 @@ public final class LyricSwitchView extends TextSwitcher {
   }
 
   /**
+   * 实测每行像素：Layout 的文字块高度除以行数（不含内边距）。
+   * 中英文会落到不同的后备字体上，逐行高度不一样，只能量不能按字号估。
+   */
+  public int getLinePx() {
+    TextView v = (TextView) this.getCurrentView();
+    if (v == null) return 0;
+    android.text.Layout layout = v.getLayout();
+    if (layout == null || layout.getLineCount() == 0) return 0;
+    return Math.round(layout.getHeight() / (float) layout.getLineCount());
+  }
+
+  /**
    * 当前文字块的宽度（最长一行 + 左右内边距）。
    *
    * 面板收起时触摸区只盖文字本身，两侧空白点穿到桌面，所以需要真实文字宽度。
