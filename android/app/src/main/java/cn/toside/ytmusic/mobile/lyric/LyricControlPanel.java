@@ -96,6 +96,8 @@ public class LyricControlPanel extends View {
   private float controlRowPx = 0f;
   private float settingsRowPx = 0f;
   private float widthRowPx = 0f;
+  /** 面板行向歌词一侧收进的距离：行盒下沿到字形之间还有留白，收一点视觉上才贴着歌词 */
+  private float rowGapPx = 0f;
   private boolean settingsVisible = false;
   /** 设置行的展开进度 0~1：展开/收起在窗口内部做裁剪动画，不改窗口尺寸 */
   private float settingsAnim = 0f;
@@ -189,13 +191,13 @@ public class LyricControlPanel extends View {
   /** 面板底色当前实际画到的上边界（设置行展开时向上/向下逐步露出） */
   private float panelDrawTop() {
     if (!above) return contentTop;
-    return contentTop - controlRowPx - (settingsRowPx + widthRowPx) * settingsAnim;
+    return contentTop - controlRowPx - (settingsRowPx + widthRowPx) * settingsAnim + rowGapPx;
   }
 
   /** 面板底色当前实际画到的下边界 */
   private float panelDrawBottom() {
     if (above) return contentTop + lyricHeight;
-    return contentTop + lyricHeight + controlRowPx + (settingsRowPx + widthRowPx) * settingsAnim;
+    return contentTop + lyricHeight + controlRowPx + (settingsRowPx + widthRowPx) * settingsAnim - rowGapPx;
   }
 
   /** 面板是否画在歌词上方（歌词贴近屏幕底部时向上弹出） */
@@ -208,14 +210,14 @@ public class LyricControlPanel extends View {
 
   /** 控制行中心 y：紧接在歌词块下方（向上弹出时紧贴歌词块上方） */
   private float controlCenterY() {
-    return above ? contentTop - controlRowPx / 2f
-      : contentTop + lyricHeight + controlRowPx / 2f;
+    return above ? contentTop - controlRowPx / 2f + rowGapPx
+      : contentTop + lyricHeight + controlRowPx / 2f - rowGapPx;
   }
 
   /** 色点行中心 y（向上弹出时依次向上排） */
   private float settingsCenterY() {
-    return above ? contentTop - controlRowPx - settingsRowPx / 2f
-      : contentTop + lyricHeight + controlRowPx + settingsRowPx / 2f;
+    return above ? contentTop - controlRowPx - settingsRowPx / 2f + rowGapPx
+      : contentTop + lyricHeight + controlRowPx + settingsRowPx / 2f - rowGapPx;
   }
 
   public void setPlaying(boolean playing) {
@@ -258,6 +260,13 @@ public class LyricControlPanel extends View {
     this.controlRowPx = controlRowPx;
     this.settingsRowPx = settingsRowPx;
     this.widthRowPx = widthRowPx;
+    invalidate();
+  }
+
+  /** 面板行向歌词一侧收进的距离（由 LyricView 按屏幕密度下发） */
+  public void setRowGap(float gapPx) {
+    if (gapPx == rowGapPx) return;
+    rowGapPx = gapPx;
     invalidate();
   }
 
@@ -496,8 +505,8 @@ public class LyricControlPanel extends View {
 
   /** 宽度控制条中心 y：和色点行的间距保持一致 */
   private float widthRowCenterY() {
-    return above ? contentTop - controlRowPx - settingsRowPx - widthRowPx / 2f
-      : contentTop + lyricHeight + controlRowPx + settingsRowPx + widthRowPx / 2f;
+    return above ? contentTop - controlRowPx - settingsRowPx - widthRowPx / 2f + rowGapPx
+      : contentTop + lyricHeight + controlRowPx + settingsRowPx + widthRowPx / 2f - rowGapPx;
   }
 
   /** 宽度控制条：按下时记录，移动时按比例换算成 10~100 的整数 */

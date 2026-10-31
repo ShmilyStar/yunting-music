@@ -232,6 +232,17 @@ public class LyricView extends Activity implements View.OnTouchListener {
   private float panelUiScale() {
     return reactContext.getResources().getConfiguration().smallestScreenWidthDp >= 600 ? 1.3f : 1f;
   }
+
+  /**
+   * 面板行向歌词一侧收进的距离。
+   *
+   * 歌词块的底边是「行盒」的下沿，字形下面还有字体内边距和版面留白，
+   * 直接贴着块底排控制行，看起来仍有一段空档。按这个距离把整块面板行
+   * （控制行 / 设置行 / 宽度条）往歌词方向挪一点，视觉上就贴上了。
+   */
+  private float panelRowGapPx() {
+    return dp(4);
+  }
   private void setLayoutParamsHeight() {
     if (textView == null) return;
     TextPaint paint = textView.getPaint();
@@ -386,6 +397,7 @@ public class LyricView extends Activity implements View.OnTouchListener {
       // 面板内部按「透明留白 → 歌词块 → 控制行 → 设置行 → 宽度条」的实际像素排布，
       // 行高随屏幕密度换算，手机 / 平板都按同一套比例走
       panel.setLayout(contentTop, lyricHeight, controlRow, settingsRow, widthRow);
+      panel.setRowGap(panelRowGapPx());
       panel.setWidthPercent(Math.round(widthPercentage * 100));
       // 歌词贴近屏幕底部、下面放不下整块面板时，面板改画到歌词上方（窗口不移动）
       updatePanelSide();
@@ -436,11 +448,13 @@ public class LyricView extends Activity implements View.OnTouchListener {
       }
     }
     // 没有歌词文字（暂停 / 空行）时保持整窗宽：否则屏幕上没有任何可点的入口
+    int after = Math.round(panelRowGapPx());
     int layerTop = layoutParams.y + lyricContentTop;
     int layerH = Math.round(lyricHeight);
     if (isPanelVisible) {
-      layerH += Math.round(panelRowsPx());
-      if (panelAbove) layerTop -= Math.round(panelRowsPx());
+      // 面板行整体向歌词一侧收进了 after，触摸区也跟着收，免得下面多出一截挡桌面
+      layerH += Math.round(panelRowsPx()) - after;
+      if (panelAbove) layerTop -= Math.round(panelRowsPx()) - after;
     }
     touchParams.width = layerW;
     touchParams.height = layerH;
